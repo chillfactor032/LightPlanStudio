@@ -1,0 +1,8 @@
+{
+    "version": "1.0.0.1",
+    "ico": "./resources/img/icon.ico",
+    "splash_image": "./resources/img/lps_splash.png",
+    "company_name": "ChillAspect",
+    "product_name": "LightPlanStudio",
+    "description": "Time Chat Controlled Lights to Music!"
+}
