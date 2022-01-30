@@ -397,12 +397,12 @@
       <enum>QLCDNumber::Flat</enum>
      </property>
     </widget>
-    <widget class="QPushButton" name="delay_calc_button">
+    <widget class="QPushButton" name="calc_delay_button">
      <property name="geometry">
       <rect>
        <x>130</x>
        <y>80</y>
-       <width>75</width>
+       <width>71</width>
        <height>23</height>
       </rect>
      </property>
@@ -866,7 +866,6 @@ p, li { white-space: pre-wrap; }
     <property name="title">
      <string>&amp;View</string>
     </property>
-    <addaction name="action_lp_wizard"/>
     <addaction name="action_show_log"/>
    </widget>
    <addaction name="menu_File"/>

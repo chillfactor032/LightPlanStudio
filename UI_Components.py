@@ -1,6 +1,88 @@
 # -*- coding: utf-8 -*-
 
 ################################################################################
+## Form generated from reading UI file 'LPS_CalcDelay.ui'
+##
+## Created by: Qt User Interface Compiler version 6.2.2
+##
+## WARNING! All changes made in this file will be lost when recompiling UI file!
+################################################################################
+
+from PySide6.QtCore import (QCoreApplication, QDate, QDateTime, QLocale,
+    QMetaObject, QObject, QPoint, QRect,
+    QSize, QTime, QUrl, Qt)
+from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
+    QFont, QFontDatabase, QGradient, QIcon,
+    QImage, QKeySequence, QLinearGradient, QPainter,
+    QPalette, QPixmap, QRadialGradient, QTransform)
+from PySide6.QtWidgets import (QApplication, QComboBox, QDialog, QLCDNumber,
+    QLabel, QPushButton, QSizePolicy, QWidget)
+
+class Ui_CalcDelayDialog(object):
+    def setupUi(self, CalcDelayDialog):
+        if not CalcDelayDialog.objectName():
+            CalcDelayDialog.setObjectName(u"CalcDelayDialog")
+        CalcDelayDialog.resize(301, 238)
+        self.command_combo = QComboBox(CalcDelayDialog)
+        self.command_combo.addItem("")
+        self.command_combo.addItem("")
+        self.command_combo.addItem("")
+        self.command_combo.setObjectName(u"command_combo")
+        self.command_combo.setGeometry(QRect(10, 110, 191, 22))
+        self.command_combo.setEditable(True)
+        self.label = QLabel(CalcDelayDialog)
+        self.label.setObjectName(u"label")
+        self.label.setGeometry(QRect(10, 0, 281, 51))
+        self.label.setWordWrap(True)
+        self.send_button = QPushButton(CalcDelayDialog)
+        self.send_button.setObjectName(u"send_button")
+        self.send_button.setGeometry(QRect(220, 110, 71, 23))
+        self.delay_lcd = QLCDNumber(CalcDelayDialog)
+        self.delay_lcd.setObjectName(u"delay_lcd")
+        self.delay_lcd.setGeometry(QRect(10, 140, 191, 51))
+        self.delay_lcd.setDigitCount(9)
+        self.stop_button = QPushButton(CalcDelayDialog)
+        self.stop_button.setObjectName(u"stop_button")
+        self.stop_button.setGeometry(QRect(220, 140, 71, 51))
+        self.label_2 = QLabel(CalcDelayDialog)
+        self.label_2.setObjectName(u"label_2")
+        self.label_2.setGeometry(QRect(10, 40, 51, 31))
+        self.label_3 = QLabel(CalcDelayDialog)
+        self.label_3.setObjectName(u"label_3")
+        self.label_3.setGeometry(QRect(10, 60, 281, 31))
+        self.label_3.setWordWrap(True)
+        self.save_button = QPushButton(CalcDelayDialog)
+        self.save_button.setObjectName(u"save_button")
+        self.save_button.setGeometry(QRect(120, 200, 81, 24))
+        self.cancel_button = QPushButton(CalcDelayDialog)
+        self.cancel_button.setObjectName(u"cancel_button")
+        self.cancel_button.setGeometry(QRect(220, 200, 71, 24))
+
+        self.retranslateUi(CalcDelayDialog)
+
+        QMetaObject.connectSlotsByName(CalcDelayDialog)
+    # setupUi
+
+    def retranslateUi(self, CalcDelayDialog):
+        CalcDelayDialog.setWindowTitle(QCoreApplication.translate("CalcDelayDialog", u"Stream Delay", None))
+        self.command_combo.setItemText(0, QCoreApplication.translate("CalcDelayDialog", u"!dim", None))
+        self.command_combo.setItemText(1, QCoreApplication.translate("CalcDelayDialog", u"!normal", None))
+        self.command_combo.setItemText(2, QCoreApplication.translate("CalcDelayDialog", u"!arctic", None))
+
+        self.label.setText(QCoreApplication.translate("CalcDelayDialog", u"Send a chat command and stop the timer when you see it reflected on stream. ", None))
+        self.send_button.setText(QCoreApplication.translate("CalcDelayDialog", u"Send", None))
+        self.stop_button.setText(QCoreApplication.translate("CalcDelayDialog", u"Stop", None))
+        self.label_2.setText(QCoreApplication.translate("CalcDelayDialog", u"Example: ", None))
+        self.label_3.setText(QCoreApplication.translate("CalcDelayDialog", u"Send a !dim command and stop the timer when the lights change.", None))
+        self.save_button.setText(QCoreApplication.translate("CalcDelayDialog", u"Save Delay", None))
+        self.cancel_button.setText(QCoreApplication.translate("CalcDelayDialog", u"Cancel", None))
+    # retranslateUi
+
+
+
+# -*- coding: utf-8 -*-
+
+################################################################################
 ## Form generated from reading UI file 'LPS_LoadingDialog.ui'
 ##
 ## Created by: Qt User Interface Compiler version 6.2.2
@@ -205,9 +287,9 @@ class Ui_LPS_MainWindow(object):
         self.delay_lcd.setLineWidth(1)
         self.delay_lcd.setDigitCount(4)
         self.delay_lcd.setSegmentStyle(QLCDNumber.Flat)
-        self.delay_calc_button = QPushButton(self.streamDelayBox)
-        self.delay_calc_button.setObjectName(u"delay_calc_button")
-        self.delay_calc_button.setGeometry(QRect(130, 80, 75, 23))
+        self.calc_delay_button = QPushButton(self.streamDelayBox)
+        self.calc_delay_button.setObjectName(u"calc_delay_button")
+        self.calc_delay_button.setGeometry(QRect(130, 80, 71, 23))
         self.label_10 = QLabel(self.streamDelayBox)
         self.label_10.setObjectName(u"label_10")
         self.label_10.setGeometry(QRect(40, 120, 161, 21))
@@ -352,7 +434,6 @@ class Ui_LPS_MainWindow(object):
         self.menu_Help.addAction(self.action_help_oauth)
         self.menu_Help.addAction(self.action_help_docs)
         self.menu_Help.addAction(self.action_help_checkcmds)
-        self.menu_View.addAction(self.action_lp_wizard)
         self.menu_View.addAction(self.action_show_log)
 
         self.retranslateUi(LPS_MainWindow)
@@ -392,7 +473,7 @@ class Ui_LPS_MainWindow(object):
         self.label_14.setText(QCoreApplication.translate("LPS_MainWindow", u"LightPlan Start:", None))
         self.lineEdit.setText(QCoreApplication.translate("LPS_MainWindow", u"00:00.000", None))
         self.streamDelayBox.setTitle(QCoreApplication.translate("LPS_MainWindow", u"Stream Delay", None))
-        self.delay_calc_button.setText(QCoreApplication.translate("LPS_MainWindow", u"Calculate", None))
+        self.calc_delay_button.setText(QCoreApplication.translate("LPS_MainWindow", u"Calculate", None))
         self.label_10.setText(QCoreApplication.translate("LPS_MainWindow", u"Runtime Adjust:", None))
         self.delay_adjust_spinner.setSuffix(QCoreApplication.translate("LPS_MainWindow", u" s", None))
         self.label_11.setText(QCoreApplication.translate("LPS_MainWindow", u" S", None))
@@ -548,177 +629,6 @@ class Ui_SettingsDialog(object):
         self.editCmdButton.setText(QCoreApplication.translate("SettingsDialog", u"Edit", None))
         self.delCmdButton.setText(QCoreApplication.translate("SettingsDialog", u"Delete", None))
         self.updateCommandsCheckBox.setText(QCoreApplication.translate("SettingsDialog", u"Update Commands on Startup", None))
-    # retranslateUi
-
-
-
-# -*- coding: utf-8 -*-
-
-################################################################################
-## Form generated from reading UI file 'LPS_StudioWizard.ui'
-##
-## Created by: Qt User Interface Compiler version 6.2.2
-##
-## WARNING! All changes made in this file will be lost when recompiling UI file!
-################################################################################
-
-from PySide6.QtCore import (QCoreApplication, QDate, QDateTime, QLocale,
-    QMetaObject, QObject, QPoint, QRect,
-    QSize, QTime, QUrl, Qt)
-from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
-    QFont, QFontDatabase, QGradient, QIcon,
-    QImage, QKeySequence, QLinearGradient, QPainter,
-    QPalette, QPixmap, QRadialGradient, QTransform)
-from PySide6.QtWidgets import (QApplication, QDialog, QFrame, QGroupBox,
-    QHeaderView, QLCDNumber, QLabel, QLineEdit,
-    QPushButton, QRadioButton, QSizePolicy, QSlider,
-    QTableWidget, QTableWidgetItem, QWidget)
-
-class Ui_WizardDialog(object):
-    def setupUi(self, WizardDialog):
-        if not WizardDialog.objectName():
-            WizardDialog.setObjectName(u"WizardDialog")
-        WizardDialog.resize(740, 418)
-        self.groupBox = QGroupBox(WizardDialog)
-        self.groupBox.setObjectName(u"groupBox")
-        self.groupBox.setGeometry(QRect(10, 10, 471, 131))
-        self.load_song_button = QPushButton(self.groupBox)
-        self.load_song_button.setObjectName(u"load_song_button")
-        self.load_song_button.setGeometry(QRect(390, 30, 71, 24))
-        self.youtube_radio_button = QRadioButton(self.groupBox)
-        self.youtube_radio_button.setObjectName(u"youtube_radio_button")
-        self.youtube_radio_button.setGeometry(QRect(20, 19, 89, 41))
-        self.youtube_radio_button.setChecked(True)
-        self.local_radio_button = QRadioButton(self.groupBox)
-        self.local_radio_button.setObjectName(u"local_radio_button")
-        self.local_radio_button.setGeometry(QRect(20, 90, 89, 21))
-        self.youtube_url_text = QLineEdit(self.groupBox)
-        self.youtube_url_text.setObjectName(u"youtube_url_text")
-        self.youtube_url_text.setGeometry(QRect(120, 30, 261, 22))
-        self.none_radio_button = QRadioButton(self.groupBox)
-        self.none_radio_button.setObjectName(u"none_radio_button")
-        self.none_radio_button.setGeometry(QRect(370, 90, 89, 21))
-        self.line = QFrame(self.groupBox)
-        self.line.setObjectName(u"line")
-        self.line.setGeometry(QRect(10, 60, 451, 20))
-        self.line.setFrameShape(QFrame.HLine)
-        self.line.setFrameShadow(QFrame.Sunken)
-        self.browse_file_button = QPushButton(self.groupBox)
-        self.browse_file_button.setObjectName(u"browse_file_button")
-        self.browse_file_button.setGeometry(QRect(110, 90, 71, 24))
-        self.groupBox_2 = QGroupBox(WizardDialog)
-        self.groupBox_2.setObjectName(u"groupBox_2")
-        self.groupBox_2.setGeometry(QRect(490, 10, 241, 341))
-        self.event_table = QTableWidget(self.groupBox_2)
-        self.event_table.setObjectName(u"event_table")
-        self.event_table.setGeometry(QRect(10, 20, 221, 311))
-        self.groupBox_3 = QGroupBox(WizardDialog)
-        self.groupBox_3.setObjectName(u"groupBox_3")
-        self.groupBox_3.setGeometry(QRect(10, 150, 471, 261))
-        self.song_slider = QSlider(self.groupBox_3)
-        self.song_slider.setObjectName(u"song_slider")
-        self.song_slider.setGeometry(QRect(10, 170, 321, 31))
-        self.song_slider.setMaximum(999)
-        self.song_slider.setOrientation(Qt.Horizontal)
-        self.song_slider.setTickPosition(QSlider.TicksBothSides)
-        self.song_slider.setTickInterval(25)
-        self.play_button = QPushButton(self.groupBox_3)
-        self.play_button.setObjectName(u"play_button")
-        self.play_button.setGeometry(QRect(10, 210, 41, 41))
-        icon = QIcon(QIcon.fromTheme(u"QStyle.SP_MediaPlay"))
-        self.play_button.setIcon(icon)
-        self.play_button.setIconSize(QSize(32, 32))
-        self.stop_button = QPushButton(self.groupBox_3)
-        self.stop_button.setObjectName(u"stop_button")
-        self.stop_button.setGeometry(QRect(420, 210, 41, 41))
-        icon1 = QIcon()
-        iconThemeName = u"QStyle.SP_MediaPlay"
-        if QIcon.hasThemeIcon(iconThemeName):
-            icon1 = QIcon.fromTheme(iconThemeName)
-        else:
-            icon1.addFile(u".", QSize(), QIcon.Normal, QIcon.Off)
-        
-        self.stop_button.setIcon(icon1)
-        self.song_name_label = QLabel(self.groupBox_3)
-        self.song_name_label.setObjectName(u"song_name_label")
-        self.song_name_label.setGeometry(QRect(10, 20, 241, 31))
-        font = QFont()
-        font.setPointSize(10)
-        font.setBold(True)
-        self.song_name_label.setFont(font)
-        self.insert_event_button = QPushButton(self.groupBox_3)
-        self.insert_event_button.setObjectName(u"insert_event_button")
-        self.insert_event_button.setGeometry(QRect(170, 210, 131, 41))
-        self.current_time_lcd = QLCDNumber(self.groupBox_3)
-        self.current_time_lcd.setObjectName(u"current_time_lcd")
-        self.current_time_lcd.setGeometry(QRect(340, 170, 121, 31))
-        self.current_time_lcd.setDigitCount(9)
-        self.current_time_lcd.setProperty("value", 123456789.000000000000000)
-        self.img_label = QLabel(self.groupBox_3)
-        self.img_label.setObjectName(u"img_label")
-        self.img_label.setGeometry(QRect(260, 20, 201, 131))
-        self.img_label.setAlignment(Qt.AlignRight|Qt.AlignTrailing|Qt.AlignVCenter)
-        self.label_2 = QLabel(self.groupBox_3)
-        self.label_2.setObjectName(u"label_2")
-        self.label_2.setGeometry(QRect(8, 90, 61, 20))
-        self.label_2.setAlignment(Qt.AlignRight|Qt.AlignTrailing|Qt.AlignVCenter)
-        self.publish_date_label = QLabel(self.groupBox_3)
-        self.publish_date_label.setObjectName(u"publish_date_label")
-        self.publish_date_label.setGeometry(QRect(80, 90, 171, 16))
-        self.label_5 = QLabel(self.groupBox_3)
-        self.label_5.setObjectName(u"label_5")
-        self.label_5.setGeometry(QRect(20, 70, 49, 16))
-        self.label_5.setAlignment(Qt.AlignRight|Qt.AlignTrailing|Qt.AlignVCenter)
-        self.author_label = QLabel(self.groupBox_3)
-        self.author_label.setObjectName(u"author_label")
-        self.author_label.setGeometry(QRect(80, 70, 171, 16))
-        self.label_7 = QLabel(self.groupBox_3)
-        self.label_7.setObjectName(u"label_7")
-        self.label_7.setGeometry(QRect(20, 130, 49, 16))
-        self.label_7.setAlignment(Qt.AlignRight|Qt.AlignTrailing|Qt.AlignVCenter)
-        self.runtime_label = QLabel(self.groupBox_3)
-        self.runtime_label.setObjectName(u"runtime_label")
-        self.runtime_label.setGeometry(QRect(80, 130, 171, 16))
-        self.groupBox_4 = QGroupBox(WizardDialog)
-        self.groupBox_4.setObjectName(u"groupBox_4")
-        self.groupBox_4.setGeometry(QRect(490, 349, 241, 61))
-        self.done_button = QPushButton(self.groupBox_4)
-        self.done_button.setObjectName(u"done_button")
-        self.done_button.setGeometry(QRect(10, 20, 75, 24))
-        self.cancel_button = QPushButton(self.groupBox_4)
-        self.cancel_button.setObjectName(u"cancel_button")
-        self.cancel_button.setGeometry(QRect(160, 20, 75, 24))
-
-        self.retranslateUi(WizardDialog)
-
-        QMetaObject.connectSlotsByName(WizardDialog)
-    # setupUi
-
-    def retranslateUi(self, WizardDialog):
-        WizardDialog.setWindowTitle(QCoreApplication.translate("WizardDialog", u"LightPlanStudio Wizard", None))
-        self.groupBox.setTitle(QCoreApplication.translate("WizardDialog", u"Song Selection", None))
-        self.load_song_button.setText(QCoreApplication.translate("WizardDialog", u"Load", None))
-        self.youtube_radio_button.setText(QCoreApplication.translate("WizardDialog", u"Youtube URL", None))
-        self.local_radio_button.setText(QCoreApplication.translate("WizardDialog", u"Local File", None))
-        self.youtube_url_text.setText(QCoreApplication.translate("WizardDialog", u"https://www.youtube.com/watch?v=dQw4w9WgXcQ", None))
-        self.none_radio_button.setText(QCoreApplication.translate("WizardDialog", u"None", None))
-        self.browse_file_button.setText(QCoreApplication.translate("WizardDialog", u"Browse", None))
-        self.groupBox_2.setTitle(QCoreApplication.translate("WizardDialog", u"Events", None))
-        self.groupBox_3.setTitle(QCoreApplication.translate("WizardDialog", u"Player", None))
-        self.play_button.setText("")
-        self.stop_button.setText("")
-        self.song_name_label.setText(QCoreApplication.translate("WizardDialog", u"Song Name", None))
-        self.insert_event_button.setText(QCoreApplication.translate("WizardDialog", u"Insert Event", None))
-        self.img_label.setText("")
-        self.label_2.setText(QCoreApplication.translate("WizardDialog", u"Published:", None))
-        self.publish_date_label.setText(QCoreApplication.translate("WizardDialog", u"TextLabel", None))
-        self.label_5.setText(QCoreApplication.translate("WizardDialog", u"Author:", None))
-        self.author_label.setText(QCoreApplication.translate("WizardDialog", u"TextLabel", None))
-        self.label_7.setText(QCoreApplication.translate("WizardDialog", u"Runtime:", None))
-        self.runtime_label.setText(QCoreApplication.translate("WizardDialog", u"TextLabel", None))
-        self.groupBox_4.setTitle(QCoreApplication.translate("WizardDialog", u"Control", None))
-        self.done_button.setText(QCoreApplication.translate("WizardDialog", u"Done", None))
-        self.cancel_button.setText(QCoreApplication.translate("WizardDialog", u"Cancel", None))
     # retranslateUi
 
 

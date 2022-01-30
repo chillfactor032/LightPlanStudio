@@ -123,7 +123,6 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         self.action_save_lp.triggered.connect(self.menu_click)
         self.action_exit.triggered.connect(self.menu_click)
         self.action_settings.triggered.connect(self.menu_click)
-        self.action_lp_wizard.triggered.connect(self.menu_click)
         self.action_show_log.triggered.connect(self.menu_click)
         self.action_help_about.triggered.connect(self.menu_click)
         self.action_help_oauth.triggered.connect(self.menu_click)
@@ -139,7 +138,8 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         self.song_slider.sliderMoved.connect(self.song_slider_moved)
         self.song_slider.sliderPressed.connect(self.song_slider_pressed)
         self.song_slider.sliderReleased.connect(self.song_slider_released)
-        
+        self.calc_delay_button.clicked.connect(self.show_calc_delay_dialog)
+
         ## Get Temp Dir to Store Files
         self.temp_dir = os.path.join(QStandardPaths.writableLocation(QStandardPaths.TempLocation), "LightPlanStudio")
         
@@ -169,8 +169,6 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
             self.log("action_exit")
         elif(sender == self.action_settings):
             self.show_settings_dialog()
-        elif(sender == self.action_lp_wizard):
-            self.show_wizard_dialog()
         elif(sender == self.action_show_log):
             self.toggle_logvisible()
         elif(sender == self.action_help_about):
@@ -289,11 +287,6 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
             self.setFixedSize(self.expandedWidth, self.height)
         else:
             self.setFixedSize(self.defaultWidth, self.height)
-    
-    def show_wizard_dialog(self):
-        dlg = LightPlanWizard(self)
-        dlg.signals.log.connect(self.log)
-        result = dlg.exec()
         
     #Menu > Settings
     def show_settings_dialog(self):
@@ -316,7 +309,15 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
             self.setFixedSize(self.expandedWidth, self.height)
         else:
             self.setFixedSize(self.defaultWidth, self.height)
-                
+
+    def show_calc_delay_dialog(self):
+        dlg = CalcDelayDialog(self)
+        dlg.signals.log.connect(self.log)
+        result = dlg.exec()
+        if(result == QDialog.Accepted):
+            self.stream_delay_ms = dlg.delay
+            self.log(f"Stream Delay: {self.stream_delay_ms}ms")
+
     def closeEvent(self, evt):
         print("Closing LightPlanStudio")
         
@@ -346,12 +347,75 @@ class LoadingDialog(QDialog):
         self.signals = self.Signals()
         self.ui = UI.Ui_LoadingDialog()
         self.ui.setupUi(self)
-        
+
     def setMovie(self, movie):
         self.movie = movie
         self.ui.loading_label.setMovie(movie)
         self.movie.start()
-        
+
+class CalcDelayDialog(QDialog):
+    
+    class Signals(QObject):
+        log = Signal(str, LogLevel)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.ui = UI.Ui_CalcDelayDialog()
+        self.ui.setupUi(self)
+        self.ui.save_button.clicked.connect(self.save_clicked)
+        self.ui.cancel_button.clicked.connect(self.cancel_clicked)
+        self.ui.send_button.clicked.connect(self.send_clicked)
+        self.ui.stop_button.clicked.connect(self.stop_clicked)
+        self.ui.stop_button.setEnabled(False)
+        self.signals = self.Signals()
+        self.update_frequency_ms = 50
+        self.delay = 0
+        self.elapsed = 0
+        self.start_time = None
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.timer_update)
+        self.ui.delay_lcd.display("00:00.000")
+
+    def timer_update(self):
+        self.elapsed = time.time()-self.start_time
+        display_str = CalcDelayDialog.secToStr(self.elapsed)
+        self.ui.delay_lcd.display(display_str)
+
+    def send_clicked(self):
+        msg = self.ui.command_combo.currentText()
+        self.log(f"Sending Command: {msg}")
+        self.elapsed = 0
+        self.start_time = time.time()
+        self.timer.start(self.update_frequency_ms)
+        self.ui.send_button.setEnabled(False)
+        self.ui.stop_button.setEnabled(True)
+        self.ui.save_button.setEnabled(False)
+        self.ui.cancel_button.setEnabled(False)
+
+    def stop_clicked(self):
+        self.timer.stop()
+        self.timer_update()
+        self.delay = round(self.elapsed*1000)
+        self.ui.send_button.setEnabled(True)
+        self.ui.stop_button.setEnabled(False)
+        self.ui.save_button.setEnabled(True)
+        self.ui.cancel_button.setEnabled(True)
+
+    def cancel_clicked(self):
+        self.reject()
+
+    def save_clicked(self):
+        self.accept()
+
+    def log(self, msg, log_level=LogLevel.DEBUG):
+        self.signals.log.emit(msg, LogLevel.DEBUG)
+
+    @staticmethod
+    def secToStr(ms):
+        #ms = ms / 1000
+        mins, secs = divmod(ms, 60)
+        return "{:02d}:{:06.3f}".format(int(mins), secs)
+
 class SettingsDialog(QDialog):
 
     class Signals(QObject):
