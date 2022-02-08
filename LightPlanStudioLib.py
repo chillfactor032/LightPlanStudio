@@ -1,6 +1,7 @@
 #Python Imports
 import json
 from enum import Enum
+from twitchio.ext import commands
 
 #PySide6 Imports
 from PySide6.QtCore import QRunnable, Signal, Slot, QObject, Qt, QAbstractTableModel
@@ -9,6 +10,7 @@ from PySide6.QtGui import QAction, QCursor, QBrush
 
 #LightPlan Imports
 from pytube import YouTube
+import irc.client
 
 #Log Levels
 class LogLevel(Enum):
@@ -23,7 +25,78 @@ class LogLevel(Enum):
                 return level
         return LogLevel.INFO
 
-   
+
+class TwitchIRC(QRunnable):
+
+    class Signals(QObject):
+        log = Signal(str, LogLevel)
+        irc_disconnect = Signal()
+        irc_connect = Signal()
+
+    def __init__(self, nickname, token, channel, server="irc.chat.twitch.tv", port=6667):
+        super(TwitchIRC, self).__init__()
+        self.stop = False
+        self.signals = self.Signals()
+        self.connection = False
+        self.server = server
+        self.port = port
+        self.nickname = nickname
+        self.token = "oauth:"+token
+        if(len(channel) > 0 and channel[0] != "#"):
+            channel = "#"+channel
+        self.channel = channel
+        self.reactor = irc.client.Reactor()
+        
+    def connected(self):
+        if(self.connection):
+            return self.connection.is_connected()
+        return False
+        
+    def on_connect(self, connection, event):
+        self.log("Connected to irc.chat.twitch.tv")
+        connection.join(self.channel)
+        self.signals.irc_connect.emit()
+
+    def on_join(self, connection, event):
+        self.log(f"Joined channel {self.channel}")
+
+    def on_disconnect(self, connection, event):
+        self.log("Disconnected from irc.chat.twitch.tv")
+        self.stop = True
+        self.signals.irc_disconnect.emit()
+
+    def privmsg(self, text):
+        if(self.connected()):
+            self.connection.privmsg(self.channel, text)
+    
+    def disconnect(self):
+        self.reactor.disconnect_all()
+    
+    def run(self):
+        try:
+            self.connect()
+        except irc.client.ServerConnectionError as err:
+            self.log(str(err), LogLevel.ERROR)
+
+        while not self.stop:
+            self.reactor.process_once()
+        self.disconnect()
+
+    def die(self):
+        self.stop = True
+
+    def connect(self):
+        try:
+            self.connection = self.reactor.server().connect(self.server, self.port, self.nickname, self.token)
+        except irc.client.ServerConnectionError as err:
+            raise
+        self.connection.add_global_handler("welcome", self.on_connect)
+        self.connection.add_global_handler("join", self.on_join)
+        self.connection.add_global_handler("disconnect", self.on_disconnect)
+
+    def log(self, msg, level=LogLevel.INFO):
+        self.signals.log.emit(msg, level)
+
 class YoutubeDownloader(QRunnable):
 
     class Signals(QObject):
@@ -90,7 +163,7 @@ class YoutubeDownloader(QRunnable):
 
 class LightPlanEvent():
     
-    def __init__(self, commands=[], offset_ms=0, command="", comment="", ignore_delay=False):
+    def __init__(self, offset_ms=0, command="", comment="", ignore_delay=False):
         self.commands = commands
         self.offset_ms = offset_ms
         self.command = command
@@ -251,9 +324,9 @@ class LightPlanTableModel(QAbstractTableModel):
         self.context_menu.popup(QCursor.pos())
         
     def click_add_event(self):
-        evt = LightPlanEvent(self.commands, 0)
-        self.insertEvent(evt)
-        
+        evt = LightPlanEvent(0)
+        self.insert_event(evt)
+
     def click_delete_event(self):
         if(self.selected_row >= 0 and self.selected_row < len(self.events)):
             self.events.pop(self.selected_row)
@@ -265,7 +338,13 @@ class LightPlanTableModel(QAbstractTableModel):
             bottom_right = self.createIndex(len(self.events)-1, len(self.headers))
             self.dataChanged.emit(top_left, bottom_right, [Qt.DisplayRole])
             self.layoutChanged.emit()
-        
+
+    def clear_events(self):
+        self.events.clear()
+        top_left = self.createIndex(0, 0)
+        self.dataChanged.emit(top_left, top_left)
+        self.layoutChanged.emit()
+
     def update_commands(self, commands):
         self.commands = commands
         
@@ -275,7 +354,7 @@ class LightPlanTableModel(QAbstractTableModel):
     def columnCount(self, parent):
         return len(self.headers)
     
-    def insertEvent(self, event):
+    def insert_event(self, event):
         row = len(self.events)
         self.events.append(event)
         if(self.persistent_editors):
@@ -348,14 +427,14 @@ class LightPlanTableModel(QAbstractTableModel):
             row_index = self.createIndex(row, 0)
             self.table_view.scrollTo(row_index)
     
-    def exportJsonDict(self):
+    def exportJsonDict(self): 
         evt_list = []
         for evt in self.events:
             obj = {
                 "offset": evt.offset_ms,
                 "command": evt.comment,
-                "comment": self.comment,
-                "ignore_delay": self.ignore_delay
+                "comment": evt.comment,
+                "ignore_delay": evt.ignore_delay
             }
             evt_list.append(obj)
         return evt_list

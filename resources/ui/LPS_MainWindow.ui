@@ -30,14 +30,17 @@
      <attribute name="title">
       <string>LightPlan Explorer</string>
      </attribute>
-     <widget class="QTreeView" name="lpe_treeview">
+     <widget class="QTreeView" name="lp_tree_view">
       <property name="geometry">
        <rect>
         <x>10</x>
         <y>10</y>
         <width>201</width>
-        <height>301</height>
+        <height>291</height>
        </rect>
+      </property>
+      <property name="alternatingRowColors">
+       <bool>true</bool>
       </property>
      </widget>
     </widget>
@@ -281,7 +284,7 @@
       <string>LightPlan Start:</string>
      </property>
     </widget>
-    <widget class="QLineEdit" name="lineEdit">
+    <widget class="QLineEdit" name="start_event_edit">
      <property name="geometry">
       <rect>
        <x>430</x>
@@ -338,46 +341,12 @@
     <property name="title">
      <string>Stream Delay</string>
     </property>
-    <widget class="QDial" name="delay_dial">
-     <property name="geometry">
-      <rect>
-       <x>10</x>
-       <y>20</y>
-       <width>101</width>
-       <height>91</height>
-      </rect>
-     </property>
-     <property name="styleSheet">
-      <string notr="true">background-color: qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:0, stop:0 rgba(0, 0, 0, 255), stop:1 rgba(255, 255, 255, 255));</string>
-     </property>
-     <property name="maximum">
-      <number>1000</number>
-     </property>
-     <property name="sliderPosition">
-      <number>0</number>
-     </property>
-     <property name="tracking">
-      <bool>true</bool>
-     </property>
-     <property name="orientation">
-      <enum>Qt::Horizontal</enum>
-     </property>
-     <property name="wrapping">
-      <bool>false</bool>
-     </property>
-     <property name="notchTarget">
-      <double>100.000000000000000</double>
-     </property>
-     <property name="notchesVisible">
-      <bool>true</bool>
-     </property>
-    </widget>
     <widget class="QLCDNumber" name="delay_lcd">
      <property name="geometry">
       <rect>
-       <x>120</x>
-       <y>20</y>
-       <width>81</width>
+       <x>30</x>
+       <y>30</y>
+       <width>171</width>
        <height>41</height>
       </rect>
      </property>
@@ -391,7 +360,7 @@
       <number>1</number>
      </property>
      <property name="digitCount">
-      <number>4</number>
+      <number>5</number>
      </property>
      <property name="segmentStyle">
       <enum>QLCDNumber::Flat</enum>
@@ -403,7 +372,7 @@
        <x>130</x>
        <y>80</y>
        <width>71</width>
-       <height>23</height>
+       <height>31</height>
       </rect>
      </property>
      <property name="text">
@@ -413,7 +382,7 @@
     <widget class="QLabel" name="label_10">
      <property name="geometry">
       <rect>
-       <x>40</x>
+       <x>30</x>
        <y>120</y>
        <width>161</width>
        <height>21</height>
@@ -433,16 +402,22 @@
       </rect>
      </property>
      <property name="minimum">
-      <number>0</number>
+      <number>-30000</number>
      </property>
      <property name="maximum">
+      <number>30000</number>
+     </property>
+     <property name="singleStep">
+      <number>100</number>
+     </property>
+     <property name="pageStep">
       <number>1000</number>
      </property>
      <property name="value">
-      <number>500</number>
+      <number>0</number>
      </property>
      <property name="sliderPosition">
-      <number>500</number>
+      <number>0</number>
      </property>
      <property name="orientation">
       <enum>Qt::Horizontal</enum>
@@ -476,17 +451,30 @@
       <double>0.100000000000000</double>
      </property>
     </widget>
-    <widget class="QLabel" name="label_11">
+    <widget class="QPushButton" name="set_delay_button">
      <property name="geometry">
       <rect>
-       <x>200</x>
-       <y>40</y>
-       <width>21</width>
-       <height>21</height>
+       <x>30</x>
+       <y>80</y>
+       <width>71</width>
+       <height>31</height>
       </rect>
      </property>
      <property name="text">
-      <string> S</string>
+      <string>Set</string>
+     </property>
+    </widget>
+    <widget class="QLabel" name="label_11">
+     <property name="geometry">
+      <rect>
+       <x>170</x>
+       <y>50</y>
+       <width>21</width>
+       <height>16</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>sec</string>
      </property>
     </widget>
    </widget>
@@ -515,7 +503,7 @@
       <string>Start LightPlan</string>
      </property>
     </widget>
-    <widget class="QPushButton" name="connectTwitchButton">
+    <widget class="QPushButton" name="twitch_connect_button">
      <property name="geometry">
       <rect>
        <x>10</x>
