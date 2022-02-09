@@ -548,7 +548,10 @@
       </rect>
      </property>
      <property name="text">
-      <string>Elapsed:</string>
+      <string>Firing In:</string>
+     </property>
+     <property name="alignment">
+      <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
      </property>
     </widget>
     <widget class="QLabel" name="control_lpelapsed_label">
@@ -575,6 +578,9 @@
      </property>
      <property name="text">
       <string>Next Event:</string>
+     </property>
+     <property name="alignment">
+      <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
      </property>
     </widget>
     <widget class="Line" name="line">

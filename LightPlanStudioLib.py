@@ -1,7 +1,7 @@
 #Python Imports
 import json
+import time
 from enum import Enum
-from twitchio.ext import commands
 
 #PySide6 Imports
 from PySide6.QtCore import QRunnable, Signal, Slot, QObject, Qt, QAbstractTableModel
@@ -9,8 +9,9 @@ from PySide6.QtWidgets import QLineEdit, QCheckBox, QComboBox, QHeaderView, QMen
 from PySide6.QtGui import QAction, QCursor, QBrush
 
 #LightPlan Imports
-from pytube import YouTube
 import irc.client
+from twitchio.ext import commands
+from pytube import YouTube
 
 #Log Levels
 class LogLevel(Enum):
@@ -24,6 +25,121 @@ class LogLevel(Enum):
             if(value == level.value):
                 return level
         return LogLevel.INFO
+
+
+class LightPlanRunner(QRunnable):
+
+    class Signals(QObject):
+        log = Signal(str, LogLevel)
+        progress = Signal(int, float, str)
+        done = Signal(str)
+
+    def __init__(self, twitch=None, lightplan_dict=None, stream_delay=0, adjust=0, starting_index=0):
+        super(LightPlanRunner, self).__init__()
+        self.signals = self.Signals()
+        self.lightplan_dict = lightplan_dict
+        self.twitch = twitch
+        self.events = self.lightplan_dict["events"].copy()
+        self.stream_delay_ms = stream_delay
+        self.runtime_adjust_ms = adjust
+        self.running = False
+        self.lp_stopped = False
+        self.start_time = 0
+        self.elapsed_time = 0
+        self.cur_index = starting_index
+
+    def update_runtime_adjustment(self, adjust_ms):
+        self.recalculate = True
+        self.runtime_adjust_ms = adjust_ms
+
+    def stop(self):
+        self.lp_stopped = True
+
+    def is_running(self):
+        return self.running
+
+    def precalculate_offset(self):
+        for evt in self.events:
+            calculated_offset = evt["offset"]
+            if(not evt["ignore_delay"]):
+                calculated_offset -= self.stream_delay_ms
+            evt["offset"] = calculated_offset
+
+    def sort_events(self, evts):
+        sorted_events = []
+        min_ms = 99999999
+        min_evt = None
+
+        while len(evts) > 0:
+            min_ms = 99999999
+            min_evt = None
+            for x in range(0, len(evts)):
+                calculated_offset = evts[x]["offset"]
+                if(not evts[x]["ignore_delay"]):
+                    calculated_offset -= self.stream_delay_ms
+                if(calculated_offset < min_ms):
+                    min_ms = calculated_offset
+                    min_evt = evts[x]
+                    evts.pop(x)
+                    break
+            sorted_events.append(min_evt)
+        return sorted_events
+
+
+    def run(self):
+        num_events = len(self.events) 
+        if(num_events==0):
+            self.done("No Events To Process")
+            return
+
+        self.start_time = time.time()
+        self.running = True
+        self.elapsed_time = 0
+        self.current_event = None
+        calculated_offset = 0
+        played_event_count = 0
+        self.log("LightPlan Started")
+        
+        #Sort the events chronologically based on offset and stream delay factoring in ignore_delay
+        self.precalculate_offset()
+        self.events = sorted(self.events, key = lambda i: i['offset'])
+        self.current_event = self.events.pop(0)
+        self.progress(0, round(self.current_event["offset"]/1000,1), self.current_event["command"])
+
+        while self.running == True:
+            # Check to see if LP has been stopped
+            if(self.lp_stopped):
+                self.done("LightPlan Stopped")
+                return
+
+            self.elapsed_time_ms = int((time.time()-self.start_time)*1000)
+
+            if(self.elapsed_time_ms >= (self.current_event["offset"]+self.runtime_adjust_ms)):
+                error = self.elapsed_time_ms - self.current_event['offset']
+                sign = "+"
+                if(error<0):
+                    sign = "-"
+                self.log(f"Fired: {self.elapsed_time_ms} {sign}{error}ms")
+                played_event_count += 1
+                if(len(self.events)>0):
+                    self.current_event = self.events.pop(0)
+                    self.progress(played_event_count, round(self.current_event["offset"]/1000,1), self.current_event["command"])
+                else:
+                    self.done("LightPlan Complete")
+                    return
+            time.sleep(0.0001)
+                
+
+    def progress(self, cur_evt_num, event_count, next_command):
+        self.signals.progress.emit(cur_evt_num, event_count, next_command)
+
+    def done(self, msg):
+        self.running = False
+        self.log(msg)
+        self.signals.done.emit(msg)
+
+    def log(self, msg, level=LogLevel.INFO):
+        self.signals.log.emit(msg, level)
 
 
 class TwitchIRC(QRunnable):
@@ -97,6 +213,7 @@ class TwitchIRC(QRunnable):
     def log(self, msg, level=LogLevel.INFO):
         self.signals.log.emit(msg, level)
 
+
 class YoutubeDownloader(QRunnable):
 
     class Signals(QObject):
@@ -118,10 +235,11 @@ class YoutubeDownloader(QRunnable):
     @Slot()
     def run(self):
         try:
+            self.signals.log.emit(f"Youtube URL [{self.youtube_url}]", LogLevel.DEBUG)
             self.youtube_obj = YouTube(self.youtube_url)
         except Exception as e:
             self.signals.log.emit(repr(e), LogLevel.ERROR)
-        if(not self.youtube_obj):
+        if(self.youtube_obj is None):
             self.signals.log.emit("Error Creating Youtube Obj", LogLevel.ERROR)
             self.signals.done.emit(False, self.result)
             return
@@ -227,12 +345,13 @@ class CheckBoxDelegate(QStyledItemDelegate):
 
     def setEditorData(self, editor, index):
         row = index.row()
-        if(row > 0 and row < len(self.model.events)):
-            value = self.model.events[index.row()].ignore_delay
+        if(row >= 0 and row < len(self.model.events)):
+            value = self.model.events[row].ignore_delay
             editor.setChecked(value)
 
     def setModelData(self, editor, model, index):
         value = editor.isChecked()
+        row = index.row()
         model.setData(index, value, Qt.EditRole)
 
 
@@ -290,8 +409,10 @@ class LightPlanTableModel(QAbstractTableModel):
         self.selected_row = -1
         self.context_menu = QMenu()
         self.action_insert_event = QAction("Add Event")
+        self.action_set_start_event = QAction("Set Start Event")
         self.action_delete_event = QAction("Delete Selected Event")
         self.context_menu.addAction(self.action_insert_event)
+        self.context_menu.addAction(self.action_set_start_event)
         self.context_menu.addAction(self.action_delete_event)
         self.action_insert_event.triggered.connect(self.click_add_event)
         self.action_delete_event.triggered.connect(self.click_delete_event)
@@ -327,9 +448,13 @@ class LightPlanTableModel(QAbstractTableModel):
         evt = LightPlanEvent(0)
         self.insert_event(evt)
 
+    def get_selected_event(self):
+        if(self.selected_row >= 0 and self.selected_row < len(self.events)):
+            return self.events[self.selected_row]
+
     def click_delete_event(self):
         if(self.selected_row >= 0 and self.selected_row < len(self.events)):
-            self.events.pop(self.selected_row)
+            evt = self.events.pop(self.selected_row)
             self.selected_row -= 1
             if(self.selected_row < 0):
                 self.selected_row = 0
@@ -338,6 +463,7 @@ class LightPlanTableModel(QAbstractTableModel):
             bottom_right = self.createIndex(len(self.events)-1, len(self.headers))
             self.dataChanged.emit(top_left, bottom_right, [Qt.DisplayRole])
             self.layoutChanged.emit()
+            return evt
 
     def clear_events(self):
         self.events.clear()
@@ -364,6 +490,9 @@ class LightPlanTableModel(QAbstractTableModel):
             self.table_view.openPersistentEditor(index)
         index = self.createIndex(row, 3)
         self.table_view.openPersistentEditor(index)
+        top_left = self.createIndex(0, 0)
+        bottom_right = self.createIndex(len(self.events)-1, len(self.headers))
+        self.dataChanged.emit(top_left, bottom_right, [Qt.DisplayRole])
         self.layoutChanged.emit()
         self.scrollToRow(row)
         self.check_table_width()
@@ -432,7 +561,7 @@ class LightPlanTableModel(QAbstractTableModel):
         for evt in self.events:
             obj = {
                 "offset": evt.offset_ms,
-                "command": evt.comment,
+                "command": evt.command,
                 "comment": evt.comment,
                 "ignore_delay": evt.ignore_delay
             }

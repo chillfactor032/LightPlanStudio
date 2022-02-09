@@ -23,7 +23,7 @@ from PySide6.QtMultimedia import QAudio, QAudioOutput, QMediaFormat, QMediaPlaye
 # LightPlanStudio Imports
 import Resources
 import UI_Components as UI
-from LightPlanStudioLib import YoutubeDownloader, LogLevel, LightPlanEvent, LightPlanTableModel, TwitchIRC
+from LightPlanStudioLib import YoutubeDownloader, LogLevel, LightPlanEvent, LightPlanTableModel, TwitchIRC, LightPlanRunner
 
 class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
     def __init__(self, app_name, version):
@@ -105,8 +105,10 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         self.red_button_css = 'QPushButton {background-color: #A3C1DA; color: red;}'
         self.default_button_css = self.twitch_connect_button.styleSheet()
         self.calc_delay_button.setEnabled(False)
+        self.control_startlp_button.setEnabled(False)
         self.delay_lcd.display("0")
         self.start_event_edit.setInputMask("99\:99\.999")
+        self.event_table_view.setStyleSheet("QTableView:disabled {background-color:#ffffff;}")
 
         #Set window Icon
         default_icon_pixmap = QStyle.StandardPixmap.SP_FileDialogListView
@@ -136,10 +138,16 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         self.lightplan_files = []
         self.file_watcher = None
         self.status_msg = "Welcome to LightPlan Studio"
+        self.lightplan_runner = None
+        self.lightplan_start_timer = QTimer()
+        self.lightplan_start_timer.timeout.connect(self.update_lightplan_elapsed)
+        self.lightplan_start_time = None
+        self.next_event_secs = 0
 
         ## Event Table ##
         self.lp_table_model = LightPlanTableModel(self.event_table_view, [], self.defaultCommands)
-        
+        self.lp_table_model.action_set_start_event.triggered.connect(self.click_set_start_event)
+
         ## Setup UI Signals ##
         # Menu Signals
         self.action_new_lp.triggered.connect(self.menu_click)
@@ -166,9 +174,11 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         self.calc_delay_button.clicked.connect(self.show_calc_delay_dialog)
         self.set_delay_button.clicked.connect(self.set_delay_dialog)
         self.twitch_connect_button.clicked.connect(self.click_twitch_connect_button)
+        self.delay_adjust_spinner.valueChanged.connect(self.delay_spinner_changed)
         self.delay_adjust_slider.sliderMoved.connect(self.delay_slider_moved)
         self.delay_adjust_slider.sliderReleased.connect(self.delay_slider_released)
         self.lp_save_button.clicked.connect(self.click_save_button)
+        self.control_startlp_button.clicked.connect(self.click_start_lightplan)
 
         ## ThreadPool
         self.threadpool = QThreadPool()
@@ -201,7 +211,7 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
     def menu_click(self):
         sender = self.sender()
         if(sender == self.action_new_lp):
-            self.log("action_new_lp")
+            self.new_lp_clicked()
         elif(sender == self.action_open_lp):
             self.show_file_dialog()
         elif(sender == self.action_save_lp):
@@ -275,6 +285,32 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         if(len(selected.data())>0):
             self.open_lp_file(selected.data())
 
+    def clear_lightplan(self):
+        self.lp_songtitle_edit.clear()
+        self.lp_artist_edit.clear()
+        self.lp_author_edit.clear()
+        self.lp_sslid_edit.clear()
+        self.lp_spotifyid_edit.clear()
+        self.lp_youtubeurl_edit.clear()
+        self.lp_notes_edit.clear()
+        self.start_event_edit.setText(msToStr(0, True))
+        self.lp_table_model.clear_events()
+
+    def new_lp_clicked(self):
+        if(self.checkLightPlanUpdated()):
+            ret = QMessageBox.question(self, "LightPlan Studio",
+                "The LightPlan has been modified.\nDo you want to save your changes?",
+                QMessageBox.Save, 
+                QMessageBox.Discard)
+            if(ret == QMessageBox.Save):
+                if(self.save_light_plan()):
+                    QMessageBox.information(self, "LightPlan Studio", "LightPlan Saved")
+        self.clear_lightplan()
+        self.current_lightplan["lightplan"] = self.lightplan_gui_to_dict()
+        self.current_lightplan["path"] = None
+        self.current_lightplan["md5"] = hashlib.md5(str(self.current_lightplan["lightplan"]).encode("utf-8")).hexdigest()
+        self.set_status("New LightPlan")
+
     ## Show Loading Gif ###
     def loading(self, show=True):
         if(show):
@@ -282,6 +318,8 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         else:
             self.loading_dialog.hide()
     
+    ## LightPlan File Functions ##
+
     def show_file_dialog(self):
         file_name = QFileDialog.getOpenFileName(self, "Open LightPlan", self.lightplan_dir, "LightPlans (*.plan)")
         if(file_name):
@@ -298,6 +336,7 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         except json.JSONDecodeError as err:
             self.log(str(err), LogLevel.ERROR)
             return
+        self.clear_lightplan()
         self.lp_songtitle_edit.setText(lightplan_dict["song_title"])
         self.lp_artist_edit.setText(lightplan_dict["song_artist"])
         self.lp_author_edit.setText(lightplan_dict["author"])
@@ -305,11 +344,10 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         self.lp_spotifyid_edit.setText(lightplan_dict["spotify_id"])
         self.lp_youtubeurl_edit.setText(lightplan_dict["youtube_url"])
         self.lp_notes_edit.setPlainText(lightplan_dict["notes"])
-        print(msToStr(lightplan_dict["starting_ms"]))
         self.start_event_edit.setText(msToStr(lightplan_dict["starting_ms"], True))
         self.lp_table_model.clear_events()
         for evt in lightplan_dict["events"]:
-            evt_obj = LightPlanEvent(evt["offset"],evt["command"],evt["comment"],evt["ignore_delay"])
+            evt_obj = LightPlanEvent(evt["offset"],evt["command"],evt["comment"],valueToBool(evt["ignore_delay"]))
             self.lp_table_model.insert_event(evt_obj)
         self.current_lightplan = {
             "path": lp_path,
@@ -372,6 +410,96 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
             self.log("LightPlan not changed", LogLevel.DEBUG)
             self.log(self.current_lightplan["md5"], LogLevel.DEBUG)
 
+    ## LightPlan Runner Functions ##
+
+    def click_start_lightplan(self):
+        #LightPlan Not Running - Start It
+        if(self.lightplan_runner is None or self.lightplan_runner.is_running() == False):
+            self.lp_songtitle_edit.setEnabled(False)
+            self.lp_artist_edit.setEnabled(False)
+            self.lp_author_edit.setEnabled(False)
+            self.lp_sslid_edit.setEnabled(False)
+            self.lp_spotifyid_edit.setEnabled(False)
+            self.lp_youtubeurl_edit.setEnabled(False)
+            self.lp_notes_edit.setEnabled(False)
+            self.start_event_edit.setEnabled(False)
+            self.event_table_view.setEnabled(False)
+            self.load_song_button.setEnabled(False)
+            self.insert_event_button.setEnabled(False)
+            self.set_delay_button.setEnabled(False)
+            self.calc_delay_button.setEnabled(False)
+            self.twitch_connect_button.setEnabled(False)
+
+            self.action_new_lp.setEnabled(False)
+            self.action_open_lp.setEnabled(False)
+            self.action_save_lp.setEnabled(False)
+            self.action_settings.setEnabled(False)
+            self.action_help_about.setEnabled(False)
+            self.action_help_oauth.setEnabled(False)
+            self.action_help_docs.setEnabled(False)
+            self.action_help_checkcmds.setEnabled(False)
+            self.event_table_view.setEditTriggers(QAbstractItemView.NoEditTriggers)
+            lp = self.lightplan_gui_to_dict()
+            self.lightplan_runner = LightPlanRunner(self.twitch, lp, self.stream_delay_ms, self.delay_adjust_ms)
+            self.lightplan_runner.signals.log.connect(self.log)
+            self.lightplan_runner.signals.done.connect(self.lightplan_runner_done)
+            self.lightplan_runner.signals.progress.connect(self.lightplan_runner_progress)
+            self.control_lp_progressbar.reset()
+            self.control_lp_progressbar.setMaximum(len(lp["events"]))
+            self.threadpool.start(self.lightplan_runner)
+            self.lightplan_start_timer.start(0.2)
+            self.lightplan_start_time = time.time()
+            self.next_event_secs = 0
+            self.set_status("LightPlan Started", 2500)
+            self.control_startlp_button.setText("Stop LightPlan")
+        else:
+            #LightPlan Already Running - Stop It
+            self.lightplan_runner.stop()
+            self.control_startlp_button.setText("Start LightPlan")
+
+    def lightplan_runner_done(self, msg="LightPlan Stopped"):
+        self.lp_songtitle_edit.setEnabled(True)
+        self.lp_artist_edit.setEnabled(True)
+        self.lp_author_edit.setEnabled(True)
+        self.lp_sslid_edit.setEnabled(True)
+        self.lp_spotifyid_edit.setEnabled(True)
+        self.lp_youtubeurl_edit.setEnabled(True)
+        self.lp_notes_edit.setEnabled(True)
+        self.start_event_edit.setEnabled(True)
+        self.event_table_view.setEnabled(True)
+        self.load_song_button.setEnabled(True)
+        self.insert_event_button.setEnabled(True)
+        self.set_delay_button.setEnabled(True)
+        self.twitch_connect_button.setEnabled(True)
+        self.calc_delay_button.setEnabled(True)
+        self.action_new_lp.setEnabled(True)
+        self.action_open_lp.setEnabled(True)
+        self.action_save_lp.setEnabled(True)
+        self.action_settings.setEnabled(True)
+        self.action_help_about.setEnabled(True)
+        self.action_help_oauth.setEnabled(True)
+        self.action_help_docs.setEnabled(True)
+        self.action_help_checkcmds.setEnabled(True)
+        self.control_nextevent_label.clear()
+        self.control_lpelapsed_label.setText("00:00")
+        self.control_lp_progressbar.reset()
+        self.control_lp_progressbar.setFormat("Light Event 0/0")
+        self.event_table_view.setEditTriggers(QAbstractItemView.DoubleClicked | QAbstractItemView.EditKeyPressed | QAbstractItemView.AnyKeyPressed)
+        self.lightplan_start_timer.stop()
+        self.set_status(msg, 2500)
+
+    def lightplan_runner_progress(self, cur_evt_num, next_event_secs, next_event):
+        self.next_event_secs = next_event_secs
+        self.control_nextevent_label.setText(next_event)
+        self.control_lp_progressbar.setValue(cur_evt_num)
+        self.control_lp_progressbar.setFormat("Light Event %v/%m")
+        
+    def update_lightplan_elapsed(self):
+        elapsed = time.time()-self.lightplan_start_time
+        target = self.next_event_secs - elapsed
+        if(target >= 0):
+            self.control_lpelapsed_label.setText(secsToStr(target))
+
     ## Twitch Chat Functions ##
 
     def click_twitch_connect_button(self):
@@ -390,17 +518,19 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
     def twitch_connect(self):
         self.twitch_connect_button.setText("Disconnect Twitch")
         self.calc_delay_button.setEnabled(True)
+        self.control_startlp_button.setEnabled(True)
 
     def twitch_disconnect(self):
         self.twitch_connect_button.setText("Connect Twitch")
         self.calc_delay_button.setEnabled(False)
+        self.control_startlp_button.setEnabled(False)
 
     ## Event Wizard Functions ##
     
     def insert_event(self):
         pos = self.audio_player.position()
         evt = LightPlanEvent(pos)
-        self.lp_table_model.insertEvent(evt)
+        self.lp_table_model.insert_event(evt)
         
     def load_youtube(self):
         self.loading()
@@ -477,6 +607,7 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
             self.audio_player.pause()
         else:
             self.audio_player.play()
+            self.insert_event_button.setFocus(Qt.TabFocusReason)
             
     def click_stop_button(self):
         self.current_time_lcd.display("00:00.000")
@@ -486,14 +617,28 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
             
     ## End Event Wizard Functions ##
     
+    def click_set_start_event(self):
+        start_evt = self.lp_table_model.click_delete_event()
+        self.start_event_edit.setText(msToStr(start_evt.offset_ms, True))
+        warning = False
+        for evt in self.lp_table_model.events:
+            if(evt.offset_ms < start_evt.offset_ms):
+                QMessageBox.warning(self, "LightPlan Studio", """It appears that there are one or more 
+                    events that occur before the starting event. These events will fire 
+                    immediately at the start of the LightPlan if not changed.""")
+
+    def delay_spinner_changed(self, val):
+        self.delay_adjust_ms = int(round(val*1000,0))
+        if(self.lightplan_runner is not None):
+            self.lightplan_runner.update_runtime_adjustment(self.delay_adjust_ms)
+        self.log(f"Stream Delay Adjustment: {self.delay_adjust_ms} ms", LogLevel.DEBUG)
+
     def delay_slider_moved(self):
         val = self.delay_adjust_slider.value()
         self.delay_adjust_spinner.setValue(round(val/1000,1))
+        self.delay_adjust_ms = val
 
     def delay_slider_released(self):
-        val = self.delay_adjust_slider.value()
-        self.delay_adjust_spinner.setValue(round(val/1000,1))
-        self.delay_adjust_ms = val
         self.log(f"Stream Delay Adjustment: {self.delay_adjust_ms} ms", LogLevel.DEBUG)
         
     def click_hidelog_button(self):
@@ -568,6 +713,8 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
                     return evt.ignore()
         if(self.twitch and self.twitch.connected()):
             self.twitch.die()
+        if(self.lightplan_runner is not None and self.lightplan_runner.is_running()):
+            self.lightplan_runner.stop()
         return evt.accept()
         
     def log(self, msg, level=LogLevel.INFO):
