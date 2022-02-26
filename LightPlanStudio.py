@@ -4,6 +4,7 @@ import sys
 import datetime
 import json
 import time
+from urllib.parse import ParseResultBytes
 import requests
 from pytube import YouTube
 from pathlib import Path
@@ -15,7 +16,7 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QStyle,
         QDialog, QInputDialog, QSplashScreen, 
         QMessageBox,QAbstractItemView, 
         QLineEdit, QFileDialog)
-from PySide6.QtCore import QFile, Slot, Signal, QObject, QThread, QStandardPaths, QSettings, QTextStream, Qt, QTimer, QThreadPool, QFileSystemWatcher, QUrl
+from PySide6.QtCore import QFile, Slot, Signal, QObject, QThread, QStandardPaths, QSettings, QTextStream, Qt, QTimer, QThreadPool, QFileSystemWatcher, QUrl, QModelIndex
 from PySide6.QtUiTools import QUiLoader
 from PySide6.QtGui import QStandardItemModel, QStandardItem, QPixmap, QIcon, QMovie, QDesktopServices, QColor, QPalette
 from PySide6.QtMultimedia import QAudio, QAudioOutput, QMediaFormat, QMediaPlayer
@@ -168,6 +169,7 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         self.lightplan_runner = None
         self.keyevent_eater = KeyEventEater()
         self.insert_event_button.installEventFilter(self.keyevent_eater)
+        self.expanded_tree_items = []
 
         # Check for updated commands if UpdateCmdsOnStart = True
         update_cmds = valueToBool(self.settings.value("LightPlanStudio/UpdateCmdsOnStart", False))
@@ -235,6 +237,8 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         self.lp_tree_view.setIndentation(12)
         self.lp_tree_view.setModel(self.lp_tree_model)
         self.lp_tree_view.doubleClicked.connect(self.lp_tree_doubleclicked)
+        self.lp_tree_view.expanded.connect(self.lptree_item_expanded)
+        self.lp_tree_view.collapsed.connect(self.lptree_item_collapsed)
         self.reset_fswatcher()
 
         #Set initial lightplan
@@ -260,6 +264,7 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         elif(sender == self.action_show_log):
             self.toggle_logvisible()
         elif(sender == self.action_help_about):
+            self.get_expanded_tree_objs()
             QMessageBox.about(self, "LightPlan Studio", self.about_text)
         elif(sender == self.action_help_oauth):
             QDesktopServices.openUrl(QUrl("https://www.twitchapps.com/tmi/"))
@@ -282,12 +287,34 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         self.refresh_lptree()
         self.file_watcher.addPath(self.lightplan_dir)
         for root, dirs, files in os.walk(self.lightplan_dir):
+            """
+            for file in files:
+                print(f"added {file}")
+                self.file_watcher.addPath(os.path.join(root, file))
+            """
             for dir in dirs:
+                print(f"added {dir}")
                 self.file_watcher.addPath(os.path.join(root, dir))
         self.file_watcher.directoryChanged.connect(self.refresh_lptree)
 
-    def refresh_lptree(self):
-        dirs = []
+    def get_expanded_tree_objs(self):
+        expanded = []
+        indexes = self.lp_tree_model.persistentIndexList()
+        for index in indexes:
+            if(self.lp_tree_view.isExpanded(index)):
+                path = []
+                data = index.data()
+                path.append(data)
+                parent = index.parent()
+                parent_data = parent.data()
+                while parent_data is not None:
+                    path.append(parent.data())
+                    parent = parent.parent()
+                    parent_data = parent.data()
+                expanded.append(path)
+        return expanded
+
+    def refresh_lptree(self, path=None):
         self.lp_tree_model.clear()
         self.lp_tree_model.setHorizontalHeaderLabels(['LightPlans'])
         self.lightplan_files = []
@@ -323,6 +350,7 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
                     obj["ssl_id"] = lightplan["ssl_id"]
                     self.lightplan_files.append(obj)
                 except ValueError as err:
+                    self.log(repr(err), LogLevel.ERROR)
                     continue
 
         ## Now assume all items have had their parent created
@@ -344,7 +372,7 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
             if(artist_item is None):
                 artist_item = QStandardItem(lp["artist"])
                 artist_item.setEditable(False)
-                artist_item.setData("")
+                artist_item.setData(lp["artist"])
                 if(lp["parent"] is not None):
                     lp["parent"].appendRow(artist_item)
                 else:
@@ -352,7 +380,45 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
             # Add the song item to the artist item
             artist_item.appendRow(item)
 
+        # Expand the items previous expanded
+        c = self.lp_tree_model.rowCount()
+        temp_list = []
+        for x in range(0, c):
+            index = self.lp_tree_model.index(x, 0)
+            index_str = self.treeindex_to_str(index)
+            if(index_str in self.expanded_tree_items):
+                self.lp_tree_view.expand(index)
+                temp_list.append(index_str)
+            num_children = self.lp_tree_model.rowCount(index)
+            for y in range(0, num_children):
+                child_index = self.lp_tree_model.index(y, 0, index)
+                child_index_str = self.treeindex_to_str(child_index)
+                if(child_index_str in self.expanded_tree_items):
+                    self.lp_tree_view.expand(child_index)
+                    temp_list.append(child_index_str)
+        self.expanded_tree_items = temp_list.copy()
 
+    def treeindex_to_str(self, index):
+        index_list = []
+        index_list.append(index.data())
+        parent = index.parent()
+        p_data = parent.data()
+        while p_data is not None:
+            index_list.append(p_data)
+            parent = parent.parent()
+            p_data = parent.data()
+        return ','.join(index_list)
+
+    def lptree_item_expanded(self, index):
+        index_str = self.treeindex_to_str(index)
+        if(index_str not in self.expanded_tree_items):
+            self.expanded_tree_items.append(index_str)
+
+    def lptree_item_collapsed(self, index):
+        index_str = self.treeindex_to_str(index)
+        if(index_str in self.expanded_tree_items):
+            self.expanded_tree_items.remove(index_str)
+                    
     def lp_tree_doubleclicked(self):
         index = self.lp_tree_view.selectedIndexes()[0]
         selected = index.model().itemFromIndex(index)
