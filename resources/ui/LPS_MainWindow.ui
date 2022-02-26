@@ -289,7 +289,7 @@
       <rect>
        <x>430</x>
        <y>210</y>
-       <width>101</width>
+       <width>91</width>
        <height>22</height>
       </rect>
      </property>
@@ -743,7 +743,7 @@ p, li { white-space: pre-wrap; }
      </property>
      <property name="icon">
       <iconset theme="QStyle.SP_MediaPlay">
-       <normaloff>.</normaloff>.</iconset>
+       <normaloff>../../../../../.designer/backup</normaloff>../../../../../.designer/backup</iconset>
      </property>
      <property name="iconSize">
       <size>
@@ -766,7 +766,7 @@ p, li { white-space: pre-wrap; }
      </property>
      <property name="icon">
       <iconset theme="QStyle.SP_MediaPlay">
-       <normaloff>.</normaloff>.</iconset>
+       <normaloff>../../../../../.designer/backup</normaloff>../../../../../.designer/backup</iconset>
      </property>
     </widget>
     <widget class="QSlider" name="song_slider">
@@ -838,6 +838,8 @@ p, li { white-space: pre-wrap; }
     <addaction name="action_new_lp"/>
     <addaction name="action_open_lp"/>
     <addaction name="action_save_lp"/>
+    <addaction name="separator"/>
+    <addaction name="action_open_lpdir"/>
     <addaction name="separator"/>
     <addaction name="action_exit"/>
    </widget>
@@ -929,6 +931,11 @@ p, li { white-space: pre-wrap; }
   <action name="action_help_checkcmds">
    <property name="text">
     <string>&amp;Check for Updated Light Commands</string>
+   </property>
+  </action>
+  <action name="action_open_lpdir">
+   <property name="text">
+    <string>Open LightPlan Directory</string>
    </property>
   </action>
  </widget>

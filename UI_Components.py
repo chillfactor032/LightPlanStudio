@@ -177,6 +177,8 @@ class Ui_LPS_MainWindow(object):
         self.action_save_lp.setObjectName(u"action_save_lp")
         self.action_help_checkcmds = QAction(LPS_MainWindow)
         self.action_help_checkcmds.setObjectName(u"action_help_checkcmds")
+        self.action_open_lpdir = QAction(LPS_MainWindow)
+        self.action_open_lpdir.setObjectName(u"action_open_lpdir")
         self.centralwidget = QWidget(LPS_MainWindow)
         self.centralwidget.setObjectName(u"centralwidget")
         self.tabWidget = QTabWidget(self.centralwidget)
@@ -255,7 +257,7 @@ class Ui_LPS_MainWindow(object):
         self.label_14.setGeometry(QRect(430, 180, 91, 16))
         self.start_event_edit = QLineEdit(self.LightPlanBox)
         self.start_event_edit.setObjectName(u"start_event_edit")
-        self.start_event_edit.setGeometry(QRect(430, 210, 101, 22))
+        self.start_event_edit.setGeometry(QRect(430, 210, 91, 22))
         self.event_table_view = QTableView(self.LightPlanBox)
         self.event_table_view.setObjectName(u"event_table_view")
         self.event_table_view.setGeometry(QRect(10, 260, 521, 321))
@@ -378,7 +380,7 @@ class Ui_LPS_MainWindow(object):
         if QIcon.hasThemeIcon(iconThemeName):
             icon = QIcon.fromTheme(iconThemeName)
         else:
-            icon.addFile(u".", QSize(), QIcon.Normal, QIcon.Off)
+            icon.addFile(u"../../../../../.designer/backup", QSize(), QIcon.Normal, QIcon.Off)
         
         self.play_button.setIcon(icon)
         self.play_button.setIconSize(QSize(32, 32))
@@ -425,6 +427,8 @@ class Ui_LPS_MainWindow(object):
         self.menu_File.addAction(self.action_open_lp)
         self.menu_File.addAction(self.action_save_lp)
         self.menu_File.addSeparator()
+        self.menu_File.addAction(self.action_open_lpdir)
+        self.menu_File.addSeparator()
         self.menu_File.addAction(self.action_exit)
         self.menu_Settings.addAction(self.action_settings)
         self.menu_Help.addAction(self.action_help_about)
@@ -455,6 +459,7 @@ class Ui_LPS_MainWindow(object):
         self.action_show_log.setText(QCoreApplication.translate("LPS_MainWindow", u"&Show Log", None))
         self.action_save_lp.setText(QCoreApplication.translate("LPS_MainWindow", u"Save LightPlan", None))
         self.action_help_checkcmds.setText(QCoreApplication.translate("LPS_MainWindow", u"&Check for Updated Light Commands", None))
+        self.action_open_lpdir.setText(QCoreApplication.translate("LPS_MainWindow", u"Open LightPlan Directory", None))
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.lightPlanTab), QCoreApplication.translate("LPS_MainWindow", u"LightPlan Explorer", None))
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.sslTab), QCoreApplication.translate("LPS_MainWindow", u"SSL Queue", None))
         self.LightPlanBox.setTitle(QCoreApplication.translate("LPS_MainWindow", u"LightPlan", None))

@@ -1,12 +1,13 @@
 #Python Imports
 import json
 import time
+import keyboard
 from enum import Enum
 
 #PySide6 Imports
-from PySide6.QtCore import QRunnable, Signal, Slot, QObject, Qt, QAbstractTableModel
-from PySide6.QtWidgets import QLineEdit, QCheckBox, QComboBox, QHeaderView, QMenu, QAbstractItemView, QStyledItemDelegate, QStyle
-from PySide6.QtGui import QAction, QCursor, QBrush
+from PySide6.QtCore import QRunnable, Signal, Slot, QObject, Qt, QAbstractTableModel, QEvent
+from PySide6.QtWidgets import QLineEdit, QCheckBox, QComboBox, QMenu, QStyledItemDelegate, QStyle
+from PySide6.QtGui import QAction, QCursor
 
 #LightPlan Imports
 import irc.client
@@ -31,25 +32,28 @@ class LightPlanRunner(QRunnable):
 
     class Signals(QObject):
         log = Signal(str, LogLevel)
-        progress = Signal(int, float, str)
+        progress = Signal(int, float, str, int)
         done = Signal(str)
+        privmsg = Signal(str)
 
-    def __init__(self, twitch=None, lightplan_dict=None, stream_delay=0, adjust=0, starting_index=0):
+    def __init__(self, lightplan_dict=None, stream_delay=0, adjust=0, start_ms=0, starting_index=0):
         super(LightPlanRunner, self).__init__()
         self.signals = self.Signals()
         self.lightplan_dict = lightplan_dict
-        self.twitch = twitch
         self.events = self.lightplan_dict["events"].copy()
+        # Remember the original order
+        for x in range(0, len(self.events)):
+            self.events[x]["original_index"] = x
         self.stream_delay_ms = stream_delay
         self.runtime_adjust_ms = adjust
         self.running = False
         self.lp_stopped = False
         self.start_time = 0
         self.elapsed_time = 0
+        self.start_ms = self.lightplan_dict["starting_ms"]
         self.cur_index = starting_index
 
     def update_runtime_adjustment(self, adjust_ms):
-        self.recalculate = True
         self.runtime_adjust_ms = adjust_ms
 
     def stop(self):
@@ -58,80 +62,77 @@ class LightPlanRunner(QRunnable):
     def is_running(self):
         return self.running
 
-    def precalculate_offset(self):
-        for evt in self.events:
-            calculated_offset = evt["offset"]
-            if(not evt["ignore_delay"]):
-                calculated_offset -= self.stream_delay_ms
-            evt["offset"] = calculated_offset
-
-    def sort_events(self, evts):
-        sorted_events = []
-        min_ms = 99999999
-        min_evt = None
-
-        while len(evts) > 0:
-            min_ms = 99999999
-            min_evt = None
-            for x in range(0, len(evts)):
-                calculated_offset = evts[x]["offset"]
-                if(not evts[x]["ignore_delay"]):
-                    calculated_offset -= self.stream_delay_ms
-                if(calculated_offset < min_ms):
-                    min_ms = calculated_offset
-                    min_evt = evts[x]
-                    evts.pop(x)
-                    break
-            sorted_events.append(min_evt)
-        return sorted_events
-
-
     def run(self):
         num_events = len(self.events) 
+
+        #If no events, dont even bother
         if(num_events==0):
             self.done("No Events To Process")
             return
 
-        self.start_time = time.time()
+        # Initialize some variables
+        start_time = time.time()
         self.running = True
-        self.elapsed_time = 0
-        self.current_event = None
-        calculated_offset = 0
+        elapsed_time_ms = 0
+        current_event = None
         played_event_count = 0
         self.log("LightPlan Started")
         
-        #Sort the events chronologically based on offset and stream delay factoring in ignore_delay
-        self.precalculate_offset()
-        self.events = sorted(self.events, key = lambda i: i['offset'])
-        self.current_event = self.events.pop(0)
-        self.progress(0, round(self.current_event["offset"]/1000,1), self.current_event["command"])
+        # Calculate the true offset factoring in "ignore_delay" and start_ms
+        for evt in self.events:
+            calculated_offset = evt["offset"]-self.start_ms
+            if(not evt["ignore_delay"]):
+                calculated_offset -= self.stream_delay_ms
+            evt["offset"] = calculated_offset
 
+        #Sort the events chronologically
+        self.events.sort(key = lambda i: i['offset'])
+
+        # Initialize the first event and send progress to the GUI Thread
+        current_event = self.events.pop(0)
+        self.progress(0, round(current_event["offset"]/1000,1), current_event["command"], -1)
+
+        # Begin LightPlanRunner Loop
         while self.running == True:
             # Check to see if LP has been stopped
             if(self.lp_stopped):
                 self.done("LightPlan Stopped")
                 return
 
-            self.elapsed_time_ms = int((time.time()-self.start_time)*1000)
+            #Update the time elapsed since LPR started
+            elapsed_time_ms = int((time.time()-start_time)*1000)
 
-            if(self.elapsed_time_ms >= (self.current_event["offset"]+self.runtime_adjust_ms)):
-                error = self.elapsed_time_ms - self.current_event['offset']
-                sign = "+"
+            #Check to see if any events need firing
+            if(elapsed_time_ms >= (current_event["offset"]+self.runtime_adjust_ms)):
+                #Calculate the error (number of ms off target)
+                error_str = ""
+                error = elapsed_time_ms - current_event['offset']
                 if(error<0):
-                    sign = "-"
-                self.log(f"Fired: {self.elapsed_time_ms} {sign}{error}ms")
+                    error_str = f" -{error}ms"
+                if(error>0):
+                    error_str = f" +{error}ms"
+
+                #Fire the event
+                self.fire(current_event['command'], error_str)
+
+                # Send the progress update to GUI Thread
+                fired_index = current_event['original_index']
                 played_event_count += 1
                 if(len(self.events)>0):
-                    self.current_event = self.events.pop(0)
-                    self.progress(played_event_count, round(self.current_event["offset"]/1000,1), self.current_event["command"])
+                    current_event = self.events.pop(0)
+                    self.progress(played_event_count, round(current_event["offset"]/1000,1), current_event["command"], fired_index)
                 else:
+                    # No more events. Done
                     self.done("LightPlan Complete")
                     return
             time.sleep(0.0001)
-                
 
-    def progress(self, cur_evt_num, event_count, next_command):
-        self.signals.progress.emit(cur_evt_num, event_count, next_command)
+    def fire(self, msg, error = ""):
+        self.signals.privmsg.emit(msg)
+        self.log(f"Fired: {msg}{error}")
+
+    def progress(self, cur_evt_num, event_count, next_command, orig_index):
+        self.signals.progress.emit(cur_evt_num, event_count, next_command, orig_index)
 
     def done(self, msg):
         self.running = False
@@ -140,6 +141,45 @@ class LightPlanRunner(QRunnable):
 
     def log(self, msg, level=LogLevel.INFO):
         self.signals.log.emit(msg, level)
+
+
+class KeyListener(QRunnable):
+
+    class Signals(QObject):
+        key_event = Signal()
+        log = Signal(str, LogLevel)
+
+    def __init__(self):
+        super(KeyListener, self).__init__()
+        self.signals = self.Signals()
+        self._done = False
+
+    def run(self):
+        hotkey = keyboard.add_hotkey('space', lambda: self.signals.key_event.emit())
+        self.log("KeyEvent Listener {SPACE} Started", LogLevel.DEBUG)
+
+        while not self._done:
+            time.sleep(0.1)
+        
+        keyboard.remove_hotkey(hotkey)
+        self.log("KeyEvent Listener {SPACE} Stopped", LogLevel.DEBUG)
+
+    def die(self):
+        self._done = True
+        
+    def log(self, msg, level=LogLevel.INFO):
+        self.signals.log.emit(msg, level)
+
+
+class KeyEventEater(QObject):
+    def __init__(self):
+        super(KeyEventEater, self).__init__()
+
+    def eventFilter(self, obj, event):
+        if (event.type() == QEvent.KeyPress):
+            return True
+        else:
+            return super().eventFilter(obj, event)
 
 
 class TwitchIRC(QRunnable):
@@ -183,6 +223,7 @@ class TwitchIRC(QRunnable):
 
     def privmsg(self, text):
         if(self.connected()):
+            self.log(f"Sent: {text}", LogLevel.DEBUG)
             self.connection.privmsg(self.channel, text)
     
     def disconnect(self):
@@ -192,10 +233,11 @@ class TwitchIRC(QRunnable):
         try:
             self.connect()
         except irc.client.ServerConnectionError as err:
-            self.log(str(err), LogLevel.ERROR)
+            self.log(repr(err), LogLevel.ERROR)
 
         while not self.stop:
             self.reactor.process_once()
+            time.sleep(0.001)
         self.disconnect()
 
     def die(self):
@@ -205,6 +247,7 @@ class TwitchIRC(QRunnable):
         try:
             self.connection = self.reactor.server().connect(self.server, self.port, self.nickname, self.token)
         except irc.client.ServerConnectionError as err:
+            self.log(repr(err), LogLevel.ERROR)
             raise
         self.connection.add_global_handler("welcome", self.on_connect)
         self.connection.add_global_handler("join", self.on_join)
@@ -212,7 +255,7 @@ class TwitchIRC(QRunnable):
 
     def log(self, msg, level=LogLevel.INFO):
         self.signals.log.emit(msg, level)
-
+    
 
 class YoutubeDownloader(QRunnable):
 
@@ -220,12 +263,13 @@ class YoutubeDownloader(QRunnable):
         done = Signal(bool, dict)
         log = Signal(str, LogLevel)
         
-    def __init__(self, youtube_url, save_dir):
+    def __init__(self, youtube_url, save_dir, filename="tmp.mp4"):
         super(YoutubeDownloader, self).__init__()
         self.youtube_url = youtube_url
         self.save_dir = save_dir
         self.audio_path = ""
         self.image_path = ""
+        self.filename = filename
         self.result = {}
         self.signals = YoutubeDownloader.Signals()
         
@@ -249,7 +293,7 @@ class YoutubeDownloader(QRunnable):
             self.signals.done.emit(False, self.result)
             return
         try:
-            self.audio_path = stream.download(self.save_dir) 
+            self.audio_path = stream.download(self.save_dir, self.filename) 
         except Exception as e:
             self.signals.log.emit("Error downloading audio stream", LogLevel.ERROR)
             self.signals.log.emit(repr(e), LogLevel.ERROR)
@@ -363,12 +407,10 @@ class ComboBoxDelegate(QStyledItemDelegate):
         self.itemlist = None
         
     def createEditor(self, parent, option, index):
-        if self.itemlist is None:
-            self.itemlist = self.model.commands
         editor = QComboBox(parent)
         editor.setEditable(True)
         editor.addItems([""])
-        editor.addItems(self.itemlist)
+        editor.addItems(self.model.commands)
         editor.setCurrentIndex(0)
         editor.installEventFilter(self)
         return editor
@@ -474,7 +516,7 @@ class LightPlanTableModel(QAbstractTableModel):
     def update_commands(self, commands):
         self.commands = commands
         
-    def rowCount(self, parent):
+    def rowCount(self, parent=None):
         return len(self.events)
 
     def columnCount(self, parent):

@@ -12,23 +12,24 @@ import hashlib
 
 # PySide6 Imports
 from PySide6.QtWidgets import (QApplication, QMainWindow, QStyle, 
-        QDialog, QInputDialog, QSplashScreen, QProgressDialog, 
-        QMessageBox, QTableWidgetItem,QAbstractItemView, 
-        QLineEdit, QCheckBox, QComboBox, QHeaderView, QFileDialog)
-from PySide6.QtCore import QFile, Slot, Signal, QObject, QThread, QStandardPaths, QSettings, QTextStream, Qt, QTimer, QThreadPool, QFileSystemWatcher
+        QDialog, QInputDialog, QSplashScreen, 
+        QMessageBox,QAbstractItemView, 
+        QLineEdit, QFileDialog)
+from PySide6.QtCore import QFile, Slot, Signal, QObject, QThread, QStandardPaths, QSettings, QTextStream, Qt, QTimer, QThreadPool, QFileSystemWatcher, QUrl
 from PySide6.QtUiTools import QUiLoader
-from PySide6.QtGui import QStandardItemModel, QStandardItem, QPixmap, QIcon, QMovie
+from PySide6.QtGui import QStandardItemModel, QStandardItem, QPixmap, QIcon, QMovie, QDesktopServices, QColor, QPalette
 from PySide6.QtMultimedia import QAudio, QAudioOutput, QMediaFormat, QMediaPlayer
+from PySide6.QtMultimediaWidgets import QVideoWidget
 
 # LightPlanStudio Imports
 import Resources
 import UI_Components as UI
-from LightPlanStudioLib import YoutubeDownloader, LogLevel, LightPlanEvent, LightPlanTableModel, TwitchIRC, LightPlanRunner
+from LightPlanStudioLib import YoutubeDownloader, LogLevel, LightPlanEvent, LightPlanTableModel, TwitchIRC, LightPlanRunner, KeyListener, KeyEventEater
 
 class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
     def __init__(self, app_name, version):
         super(LightPlanStudio, self).__init__()
-        
+
         #Read Version File From Resources
         version_file = QFile(":version.json")
         version_file.open(QFile.ReadOnly)
@@ -37,20 +38,34 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         self.version_dict = json.loads(version_file_text)
         self.app_name = self.version_dict["product_name"]
         self.version = self.version_dict["version"]
-        
-        ## Get Temp Dir to Store Files
+        self.repo = "https://github.com/chillfactor032/LightPlanStudio"
+
+        #Load UI Components
+        self.setupUi(self)
+        self.setWindowTitle(f"{self.app_name} {self.version}")
+
+        # About Text
+        self.about_text = f"Light Plan Studio v{self.version}\n\nAuthor: ChillFacToR032\nContact: chill@chillaspect.com\n\n{self.repo}"
+
+        ## Get Directories to Store Files
+        self.documents_dir =  QStandardPaths.writableLocation(QStandardPaths.DocumentsLocation)
         self.temp_dir = os.path.join(QStandardPaths.writableLocation(QStandardPaths.TempLocation), "LightPlanStudio")
         self.config_dir = QStandardPaths.writableLocation(QStandardPaths.ConfigLocation)
         if(not os.path.isdir(self.config_dir)):
             os.mkdir(self.config_dir)
         self.ini_path = os.path.join(self.config_dir, "LightPlanStudio.ini").replace("\\", "/")
         self.default_lightplan_dir = os.path.join(self.config_dir, "LightPlans").replace("\\", "/")
+        self.audio_dir = os.path.join(self.config_dir, "Audio").replace("\\", "/")
         if(not os.path.isdir(self.default_lightplan_dir)):
             os.mkdir(self.default_lightplan_dir)
+        if(not os.path.isdir(self.audio_dir)):
+            os.mkdir(self.audio_dir)
 
         #Get Settings
         self.settings = QSettings(self.ini_path, QSettings.IniFormat)
         self.log_level = LogLevel.get(self.settings.value("LightPlanStudio/LogLevel", LogLevel.INFO, int))
+        if(self.settings):
+            self.log("Settings Loaded")
         self.lightplan_dir = self.settings.value("LightPlanStudio/LightPlanDir", self.default_lightplan_dir)
         if(not os.path.isdir(self.lightplan_dir)):
             os.mkdir(self.lightplan_dir)
@@ -81,9 +96,9 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         self.defaultWidth = 800
         self.expandedWidth = 1250
         
-        #Load UI Components
-        self.setupUi(self)
-        self.setWindowTitle(f"{self.app_name} {self.version}")
+        self.log(f"Config File:{self.ini_path}", LogLevel.DEBUG)
+
+        ## Setup UI
         self.loading_pixmap = QPixmap(":resources/img/loading.gif")
         self.loading_movie = QMovie(":resources/img/loading.gif")
         self.loading_dialog = LoadingDialog(self)
@@ -94,6 +109,7 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         style = self.style()
         self.check_icon = style.standardIcon(QStyle.SP_DialogApplyButton)
         self.x_icon = style.standardIcon(QStyle.SP_DialogCloseButton)
+        self.dir_icon = style.standardIcon(QStyle.SP_DirIcon)
         self.play_icon = QIcon.fromTheme("media-playback-start.png", style.standardIcon(QStyle.SP_MediaPlay))
         self.pause_icon = QIcon.fromTheme("media-playback-pause.png", style.standardIcon(QStyle.SP_MediaPause))
         self.stop_icon = QIcon.fromTheme("media-playback-stop.png", style.standardIcon(QStyle.SP_MediaStop))
@@ -109,6 +125,8 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         self.delay_lcd.display("0")
         self.start_event_edit.setInputMask("99\:99\.999")
         self.event_table_view.setStyleSheet("QTableView:disabled {background-color:#ffffff;}")
+        self.twitch_connect_button.setCheckable(True)
+        self.control_startlp_button.setCheckable(True)
 
         #Set window Icon
         default_icon_pixmap = QStyle.StandardPixmap.SP_FileDialogListView
@@ -122,9 +140,13 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
             self.lightplan_icon = default_icon
         
         ## Setup Audio Player
+        self.video_output = QVideoWidget(self)
+        #Maybe Show the video somewhere in the future. For now, hide it
+        self.video_output.hide()
         self.audio_output = QAudioOutput()
         self.audio_player = QMediaPlayer()
         self.audio_player.setAudioOutput(self.audio_output)
+        self.audio_player.setVideoOutput(self.video_output)
         self.audio_player.errorOccurred.connect(self.audio_player_error)
         self.audio_player.positionChanged.connect(self.positionChanged)
         self.audio_player.durationChanged.connect(self.durationChanged)
@@ -138,21 +160,38 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         self.lightplan_files = []
         self.file_watcher = None
         self.status_msg = "Welcome to LightPlan Studio"
-        self.lightplan_runner = None
         self.lightplan_start_timer = QTimer()
         self.lightplan_start_timer.timeout.connect(self.update_lightplan_elapsed)
         self.lightplan_start_time = None
         self.next_event_secs = 0
+        self.key_listener = None
+        self.lightplan_runner = None
+        self.keyevent_eater = KeyEventEater()
+        self.insert_event_button.installEventFilter(self.keyevent_eater)
+
+        # Check for updated commands if UpdateCmdsOnStart = True
+        update_cmds = valueToBool(self.settings.value("LightPlanStudio/UpdateCmdsOnStart", False))
+        if(update_cmds):
+            cmds = self.fetch_commands()
+            if(cmds["commands"] is not None):
+                self.defaultCommands = cmds["commands"]
+                self.log("Updated Commands")
+            else:
+                self.log("Could not update commands")
 
         ## Event Table ##
         self.lp_table_model = LightPlanTableModel(self.event_table_view, [], self.defaultCommands)
         self.lp_table_model.action_set_start_event.triggered.connect(self.click_set_start_event)
+        self.lp_table_model.dataChanged.connect(self.update_progressbar)
+        self.control_lp_progressbar.valueChanged.connect(self.update_progressbar)
+        self.update_progressbar()
 
         ## Setup UI Signals ##
         # Menu Signals
         self.action_new_lp.triggered.connect(self.menu_click)
         self.action_open_lp.triggered.connect(self.menu_click)
         self.action_save_lp.triggered.connect(self.menu_click)
+        self.action_open_lpdir.triggered.connect(self.menu_click)
         self.action_exit.triggered.connect(self.menu_click)
         self.action_settings.triggered.connect(self.menu_click)
         self.action_show_log.triggered.connect(self.menu_click)
@@ -165,7 +204,7 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         # Button Signals
         self.debug_hidelog_button.clicked.connect(self.click_hidelog_button)
         self.load_song_button.clicked.connect(self.load_youtube)
-        self.insert_event_button.clicked.connect(self.insert_event)
+        self.insert_event_button.pressed.connect(self.insert_event)
         self.play_button.clicked.connect(self.click_play_button)
         self.stop_button.clicked.connect(self.click_stop_button)
         self.song_slider.sliderMoved.connect(self.song_slider_moved)
@@ -179,7 +218,7 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         self.delay_adjust_slider.sliderReleased.connect(self.delay_slider_released)
         self.lp_save_button.clicked.connect(self.click_save_button)
         self.control_startlp_button.clicked.connect(self.click_start_lightplan)
-
+        
         ## ThreadPool
         self.threadpool = QThreadPool()
         
@@ -202,11 +241,7 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         self.current_lightplan = {"path": None}
         self.current_lightplan["lightplan"] = self.lightplan_gui_to_dict()
         self.current_lightplan["md5"] = hashlib.md5(str(self.current_lightplan["lightplan"]).encode("utf-8")).hexdigest()
-        
-        #Print Log Messages
-        self.log(f"Config File:{self.ini_path}", LogLevel.DEBUG)
-        
-        
+
     ### Menu Signals #####
     def menu_click(self):
         sender = self.sender()
@@ -215,21 +250,29 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         elif(sender == self.action_open_lp):
             self.show_file_dialog()
         elif(sender == self.action_save_lp):
-            self.log("action_save_lp")
+            self.click_save_button()
+        elif(sender == self.action_open_lpdir):
+            os.startfile(self.lightplan_dir)
         elif(sender == self.action_exit):
-            self.log("action_exit")
+            self.close()
         elif(sender == self.action_settings):
             self.show_settings_dialog()
         elif(sender == self.action_show_log):
             self.toggle_logvisible()
         elif(sender == self.action_help_about):
-            self.log("action_help_about")
+            QMessageBox.about(self, "LightPlan Studio", self.about_text)
         elif(sender == self.action_help_oauth):
-            self.log("action_help_oauth")
+            QDesktopServices.openUrl(QUrl("https://www.twitchapps.com/tmi/"))
         elif(sender == self.action_help_docs):
-            self.log("action_help_docs")
+            QDesktopServices.openUrl(QUrl("http://lightplanstudio.com/wiki/doku.php"))
         elif(sender == self.action_help_checkcmds):
-            self.log("action_help_checkcmds")
+            cmds = self.fetch_commands()
+            if(cmds["commands"] is not None and cmds["commands"] != self.defaultCommands):
+                self.defaultCommands = cmds["commands"]
+                self.lp_table_model.update_commands(self.defaultCommands)
+                QMessageBox.information(self, "LightPlan Studio", "Commands have been updated.")
+            else:
+                QMessageBox.information(self, "LightPlan Studio", "Commands are up to date.")
     
     # Setup FileSystemWatcher To keep the LP Explorer Updated
     def reset_fswatcher(self):
@@ -244,6 +287,7 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         self.file_watcher.directoryChanged.connect(self.refresh_lptree)
 
     def refresh_lptree(self):
+        dirs = []
         self.lp_tree_model.clear()
         self.lp_tree_model.setHorizontalHeaderLabels(['LightPlans'])
         self.lightplan_files = []
@@ -256,7 +300,24 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
                     lightplan = json.load(json_file)
                     if("song_artist" not in lightplan or "song_title" not in lightplan):
                         continue
-                    obj["path"] = plan.__str__()
+                    obj["path"] = plan.__str__().replace("\\", "/")
+                    # If parent directory not the lightplan dir, add a parent item
+                    dir_path = os.path.dirname(obj["path"])
+                    if(dir_path and dir_path != self.lightplan_dir):
+                        dir = os.path.basename(dir_path)
+                        parent_items = self.lp_tree_model.findItems(dir)
+                        if(len(parent_items) == 0):
+                            # Create Parent Item if it doesnt exist
+                            parent = QStandardItem(dir)
+                            parent.setEditable(False)
+                            parent.setData(dir)
+                            parent.setIcon(self.dir_icon)
+                            self.lp_tree_model.appendRow(parent)
+                            obj["parent"] = parent
+                        else:
+                            obj["parent"] = parent_items[0]
+                    else:
+                        obj["parent"] = None
                     obj["artist"] = lightplan["song_artist"]
                     obj["title"] = lightplan["song_title"]
                     obj["ssl_id"] = lightplan["ssl_id"]
@@ -264,26 +325,41 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
                 except ValueError as err:
                     continue
 
+        ## Now assume all items have had their parent created
         for lp in self.lightplan_files:
             item = QStandardItem(lp["title"])
             item.setEditable(False)
             item.setData(lp["path"])
             item.setIcon(self.lightplan_icon)
-            artist = self.lp_tree_model.findItems(lp["artist"])
-            if(len(artist)>0):
-                artist[0].appendRow(item)
-            else:
-                parent = QStandardItem(lp["artist"])
-                parent.setEditable(False)
-                parent.setData("")
-                parent.appendRow(item)
-                self.lp_tree_model.appendRow(parent)  
+            artist_item = None
+            artist_items = self.lp_tree_model.findItems(lp["artist"])
+
+            # Match the artist name to the artist item with the correct parent
+            for ai in artist_items:
+                    if(ai.parent() == lp["parent"]):
+                        artist_item = ai
+                        break
+            
+            # If artist not matched, create the artist item with correct parent
+            if(artist_item is None):
+                artist_item = QStandardItem(lp["artist"])
+                artist_item.setEditable(False)
+                artist_item.setData("")
+                if(lp["parent"] is not None):
+                    lp["parent"].appendRow(artist_item)
+                else:
+                    self.lp_tree_model.appendRow(artist_item)
+            # Add the song item to the artist item
+            artist_item.appendRow(item)
+
 
     def lp_tree_doubleclicked(self):
         index = self.lp_tree_view.selectedIndexes()[0]
         selected = index.model().itemFromIndex(index)
         if(len(selected.data())>0):
-            self.open_lp_file(selected.data())
+            data = selected.data()
+            self.check_save_lightplan()
+            self.open_lp_file(data)
 
     def clear_lightplan(self):
         self.lp_songtitle_edit.clear()
@@ -295,6 +371,7 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         self.lp_notes_edit.clear()
         self.start_event_edit.setText(msToStr(0, True))
         self.lp_table_model.clear_events()
+        self.update_progressbar()
 
     def new_lp_clicked(self):
         if(self.checkLightPlanUpdated()):
@@ -319,6 +396,16 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
             self.loading_dialog.hide()
     
     ## LightPlan File Functions ##
+
+    def check_save_lightplan(self):
+        if(self.checkLightPlanUpdated()):
+            ret = QMessageBox.question(self, "LightPlan Studio",
+                "The LightPlan has been modified.\nDo you want to save your changes?",
+                QMessageBox.Save, 
+                QMessageBox.Discard)
+            if(ret == QMessageBox.Save):
+                if(self.save_light_plan()):
+                    QMessageBox.information(self, "LightPlan Studio", "LightPlan Saved")
 
     def show_file_dialog(self):
         file_name = QFileDialog.getOpenFileName(self, "Open LightPlan", self.lightplan_dir, "LightPlans (*.plan)")
@@ -354,6 +441,7 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
             "md5": hashlib.md5(str(lightplan_dict).encode("utf-8")).hexdigest(),
             "lightplan": lightplan_dict
         }
+        self.update_progressbar()
         self.set_status(self.current_lightplan["path"])
 
     def checkLightPlanUpdated(self):
@@ -391,9 +479,7 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
             QMessageBox.warning(self, "LightPlan Studio", "Song Artist and Title are required.")
             return False
         if(self.current_lightplan["path"] is None):
-            keepcharacters = (' ','.','_',"-")
-            file_name = f"{self.current_lightplan['lightplan']['song_artist']} - {self.current_lightplan['lightplan']['song_title']}.plan"
-            file_name = "".join(c for c in file_name if c.isalnum() or c in keepcharacters).rstrip()
+            file_name = self.get_lp_basename(self.current_lightplan['lightplan']['song_artist'], self.current_lightplan['lightplan']['song_title'])
             self.current_lightplan["path"] = os.path.join(self.lightplan_dir, file_name).replace("\\", "/")
         lp_json = json.dumps(self.current_lightplan["lightplan"])
         with open(self.current_lightplan["path"], "w") as file:
@@ -409,6 +495,29 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         else:
             self.log("LightPlan not changed", LogLevel.DEBUG)
             self.log(self.current_lightplan["md5"], LogLevel.DEBUG)
+
+    def get_lp_basename(self, artist, title, extension="plan"):
+        keepcharacters = (' ','.','_',"-")
+        file_name = f"{artist} - {title}"
+        file_name = "".join(c for c in file_name if c.isalnum() or c in keepcharacters).rstrip()
+        return f"{file_name}.{extension}"
+
+    def hash_str(self, value, length=16):
+        if(length>32 or length<1):
+            length=32
+        hash = hashlib.md5(value.encode("UTF-8")).hexdigest()
+        return hash[:length]
+
+    def update_progressbar(self, left=None, right=None, roles=None):
+        num_events = self.lp_table_model.rowCount()
+        if(num_events <= 0):
+            self.control_lp_progressbar.setTextVisible(False)
+            self.control_lp_progressbar.setMaximum(1)
+        else:
+            if(self.control_lp_progressbar.isTextVisible()==False):
+                self.control_lp_progressbar.setTextVisible(True)
+            self.control_lp_progressbar.setMaximum(num_events)
+        self.control_lp_progressbar.setFormat("LightPlan Event %v/%m")
 
     ## LightPlan Runner Functions ##
 
@@ -429,7 +538,6 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
             self.set_delay_button.setEnabled(False)
             self.calc_delay_button.setEnabled(False)
             self.twitch_connect_button.setEnabled(False)
-
             self.action_new_lp.setEnabled(False)
             self.action_open_lp.setEnabled(False)
             self.action_save_lp.setEnabled(False)
@@ -440,12 +548,12 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
             self.action_help_checkcmds.setEnabled(False)
             self.event_table_view.setEditTriggers(QAbstractItemView.NoEditTriggers)
             lp = self.lightplan_gui_to_dict()
-            self.lightplan_runner = LightPlanRunner(self.twitch, lp, self.stream_delay_ms, self.delay_adjust_ms)
+            self.control_lp_progressbar.setValue(0)
+            self.lightplan_runner = LightPlanRunner(lp, self.stream_delay_ms, self.delay_adjust_ms)
             self.lightplan_runner.signals.log.connect(self.log)
             self.lightplan_runner.signals.done.connect(self.lightplan_runner_done)
             self.lightplan_runner.signals.progress.connect(self.lightplan_runner_progress)
-            self.control_lp_progressbar.reset()
-            self.control_lp_progressbar.setMaximum(len(lp["events"]))
+            self.lightplan_runner.signals.privmsg.connect(self.privmsg)
             self.threadpool.start(self.lightplan_runner)
             self.lightplan_start_timer.start(0.2)
             self.lightplan_start_time = time.time()
@@ -482,18 +590,24 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         self.action_help_checkcmds.setEnabled(True)
         self.control_nextevent_label.clear()
         self.control_lpelapsed_label.setText("00:00")
-        self.control_lp_progressbar.reset()
-        self.control_lp_progressbar.setFormat("Light Event 0/0")
+        self.control_lp_progressbar.setValue(0)
         self.event_table_view.setEditTriggers(QAbstractItemView.DoubleClicked | QAbstractItemView.EditKeyPressed | QAbstractItemView.AnyKeyPressed)
         self.lightplan_start_timer.stop()
+        self.control_startlp_button.setChecked(False)
+        self.control_startlp_button.setText("Start LightPlan")
         self.set_status(msg, 2500)
 
-    def lightplan_runner_progress(self, cur_evt_num, next_event_secs, next_event):
+    def lightplan_runner_progress(self, cur_evt_num, next_event_secs, next_event, original_index):
         self.next_event_secs = next_event_secs
         self.control_nextevent_label.setText(next_event)
         self.control_lp_progressbar.setValue(cur_evt_num)
-        self.control_lp_progressbar.setFormat("Light Event %v/%m")
-        
+        if(original_index >= 0 and original_index < len(self.lp_table_model.events)):
+            self.event_table_view.selectRow(original_index)
+            self.lp_table_model.scrollToRow(original_index)
+        else:
+            self.event_table_view.selectRow(0)
+            self.lp_table_model.scrollToRow(0)
+            
     def update_lightplan_elapsed(self):
         elapsed = time.time()-self.lightplan_start_time
         target = self.next_event_secs - elapsed
@@ -501,6 +615,10 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
             self.control_lpelapsed_label.setText(secsToStr(target))
 
     ## Twitch Chat Functions ##
+
+    def privmsg(self, msg):
+        if(self.twitch and self.twitch.connected()):
+            self.twitch.privmsg(msg)
 
     def click_twitch_connect_button(self):
         if(self.twitch and self.twitch.connected()):
@@ -526,31 +644,64 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         self.control_startlp_button.setEnabled(False)
 
     ## Event Wizard Functions ##
-    
+
     def insert_event(self):
         pos = self.audio_player.position()
         evt = LightPlanEvent(pos)
         self.lp_table_model.insert_event(evt)
+        self.update_progressbar()
         
     def load_youtube(self):
+        url = self.lp_youtubeurl_edit.text().strip()
+        if(len(url)==0):
+            self.log("No Youtube URL Specified")
+            choice = QMessageBox.information(self, "Load Video", 
+                "No Youtube URL spectified. Would you like to load an local mp4 file instead?",
+                (QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No),
+                QMessageBox.StandardButton.Yes)
+            if(choice == QMessageBox.StandardButton.No):
+                return
+            else:
+                file_name = QFileDialog.getOpenFileName(self, "Load MP4 File", self.documents_dir, "MP4 Video (*.mp4)")
+                if(len(file_name[0]) > 0 and os.path.exists(file_name[0])):
+                    self.log(f"Loading Local MP4 File: {file_name[0]}")
+                    data = {
+                        "audio_path": file_name[0],
+                        "image_path": ""
+                    }
+                    self.download_complete(True, data)
+                    return
+
         self.loading()
-        self.song_slider.setEnabled(False)
-        self.play_button.setEnabled(False)
-        self.insert_event_button.setEnabled(False)
-        self.stop_button.setEnabled(False)
-        self.current_time_lcd.display("00:00.000")
-        url = self.lp_youtubeurl_edit.text()
-        yt = YoutubeDownloader(url, self.temp_dir)
-        yt.signals.log.connect(self.log)
-        yt.signals.done.connect(self.download_complete)
-        self.threadpool.start(yt)
-    
+        filename = self.hash_str(url)+".mp4"
+        audio_path = os.path.join(self.audio_dir, filename).replace("\\", "/")
+        if(not os.path.exists(audio_path)):
+            self.song_slider.setEnabled(False)
+            self.play_button.setEnabled(False)
+            self.insert_event_button.setEnabled(False)
+            self.stop_button.setEnabled(False)
+            self.current_time_lcd.display("00:00.000")
+            url = self.lp_youtubeurl_edit.text()
+            yt = YoutubeDownloader(url, self.audio_dir, filename)
+            yt.signals.log.connect(self.log)
+            yt.signals.done.connect(self.download_complete)
+            self.threadpool.start(yt)
+        else:
+            data = {
+                "audio_path": audio_path,
+                "image_path": ""
+            }
+            self.log("Youtube Audio Loaded From Cache")
+            self.log(audio_path, LogLevel.DEBUG)
+            self.download_complete(True, data)
+
     def download_complete(self, result, data=None):
         if(not result):
             return
         self.song_file_path = data["audio_path"]
         self.song_image_path = data["image_path"]
-        self.audio_player.setSource(self.song_file_path)
+        #self.audio_player.setSource(self.song_file_path)
+        self.audio_player.setSource(QUrl.fromLocalFile(self.song_file_path))
         self.position_ms = 0
         self.song_loaded = True
         self.song_slider.setEnabled(True)
@@ -583,6 +734,7 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
     @Slot(QMediaPlayer.Error, str)
     def audio_player_error(self, error, error_string):
         print(error_string, file=sys.stderr)
+        self.log(error_string, LogLevel.ERROR)
         ret = QMessageBox.warning(self, "Error", error_string)
     
     def durationChanged(self):
@@ -590,9 +742,17 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
     
     def playbackStateChanged(self):
         if(self.audio_player.playbackState() == QMediaPlayer.PlayingState):
+            self.key_listener = KeyListener()
+            self.key_listener.signals.key_event.connect(self.insert_event)
+            self.key_listener.signals.log.connect(self.log)
+            self.threadpool.start(self.key_listener)
+            self.insert_event_button.setText("Insert Event\n(Space Bar)")
             self.play_button.setIcon(self.pause_icon)
         else:
+            if(self.key_listener):
+                self.key_listener.die()
             self.play_button.setIcon(self.play_icon)
+            self.insert_event_button.setText("Insert Event")
         
     def positionChanged(self):
         if(self.duration_ms == 0):
@@ -618,6 +778,11 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
     ## End Event Wizard Functions ##
     
     def click_set_start_event(self):
+        cur_start = self.start_event_edit.text()
+        if(cur_start != "00:00.000"):
+            ret = QMessageBox.question(self, "LightPlan Studio", "A starting event has already been set. Want to overwrite it?", buttons=(QMessageBox.Ok | QMessageBox.Cancel))
+            if(ret == QMessageBox.Cancel):
+                return
         start_evt = self.lp_table_model.click_delete_event()
         self.start_event_edit.setText(msToStr(start_evt.offset_ms, True))
         warning = False
@@ -660,6 +825,18 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
             self.status_msg = msg
         self.statusbar.showMessage(msg, timeout)
 
+    def fetch_commands(self):
+        url = "https://lightplanstudio.com/api/commands.json"
+        self.log(f"Requesting updated light commands {url}", LogLevel.DEBUG)
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko)"}
+        r = requests.get(url, headers=headers)
+        self.log(f"HTTP Status Code {r.status_code}", LogLevel.DEBUG)
+        if(r.status_code==200):
+            return r.json()
+        self.log("Could not fetch light commands!", LogLevel.ERROR)
+        self.log(r.text, LogLevel.ERROR)
+        return None
+
     #Menu > Settings
     def show_settings_dialog(self):
         dlg = SettingsDialog(self.default_lightplan_dir, self)
@@ -701,21 +878,21 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
             self.log(f"Stream Delay: {self.stream_delay_ms}ms")
 
     def closeEvent(self, evt):
-        if(self.checkLightPlanUpdated()):
-            ret = QMessageBox.question(self, "LightPlan Studio",
-                "The LightPlan has been modified.\nDo you want to save your changes?",
-                QMessageBox.Save, 
-                QMessageBox.Discard)
-            if(ret == QMessageBox.Save):
-                if(self.save_light_plan()):
-                    QMessageBox.information(self, "LightPlan Studio", "LightPlan Saved")
-                else:
-                    return evt.ignore()
+        self.check_save_lightplan()
+        if(self.key_listener):
+            self.key_listener.die()
         if(self.twitch and self.twitch.connected()):
             self.twitch.die()
         if(self.lightplan_runner is not None and self.lightplan_runner.is_running()):
             self.lightplan_runner.stop()
         return evt.accept()
+    
+    def get_parent_dir(self, path_str):
+        dir_path = os.path.dirname(path_str)
+        if(dir_path):
+            dir = os.path.basename(dir_path)
+            return dir
+        return None
         
     def log(self, msg, level=LogLevel.INFO):
         if(not msg or level.value > self.log_level.value):
@@ -724,6 +901,7 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
             style = "color: #cc0000;"
         elif(level == LogLevel.DEBUG):
             style = "color: #006600;"
+            print(msg)
         else:
             style = "color: #000000;"
         now = datetime.datetime.now()
@@ -842,10 +1020,11 @@ class SettingsDialog(QDialog):
         self.default_dir = default_dir
         # Hide OAuth Token?
         self.ui.oauthEdit.setEchoMode(QLineEdit.Password)
+        self.lightplan_dir = default_dir
         self.settings = None
     
     def dir_browse_clicked(self):
-        dir = QFileDialog.getExistingDirectory(self, "LightPLan Directory")
+        dir = QFileDialog.getExistingDirectory(self, "LightPLan Directory", self.lightplan_dir)
         if(dir):
             self.ui.dir_edit.setText(dir)
 
@@ -863,7 +1042,8 @@ class SettingsDialog(QDialog):
         self.ui.channelEdit.setText(self.settings.value("Twitch/Channel", ""))
         self.ui.showLogCheckBox.setChecked(show_log)
         self.ui.updateCommandsCheckBox.setChecked(update_cmds)
-        self.ui.dir_edit.setText(self.settings.value("LightPlanStudio/LightPlanDir", self.default_dir))
+        self.lightplan_dir = self.settings.value("LightPlanStudio/LightPlanDir", self.default_dir)
+        self.ui.dir_edit.setText(self.lightplan_dir)
         log_level_value = self.settings.value("LightPlanStudio/LogLevel", LogLevel.INFO.value, int)
 
         self.log_level = LogLevel.get(log_level_value)
@@ -915,7 +1095,6 @@ class SettingsDialog(QDialog):
         self.log_level = self.ui.log_level_combo.currentData()
         self.settings.setValue("LightPlanStudio/LogLevel", self.log_level.value)
         self.settings.setValue("LightPlanStudio/LightPlanDir", self.ui.dir_edit.text())
-
         custom_cmds = []
         for x in range(self.ui.customCmdListView.count()):
             custom_cmds.append(self.ui.customCmdListView.item(x).text())
@@ -962,6 +1141,35 @@ if __name__ == "__main__":
     app.setOrganizationName(org_name)
     app.setApplicationName(app_name)
     app.setApplicationVersion(version)
+
+    """
+    ## Theme Editor? ##
+    app.setStyle(QStyleFactory.create("Fusion"))
+    palette = QPalette()
+    background_color = QColor(21,32,43)
+    background_alt_color = QColor(34,48,60)
+    button_color = QColor(136, 153, 166)
+    disabledColor = QColor(127,127,127)
+    palette.setColor(QPalette.Window, background_color)
+    palette.setColor(QPalette.WindowText, Qt.white)
+    palette.setColor(QPalette.Base, QColor(18,18,18))
+    palette.setColor(QPalette.AlternateBase, background_alt_color)
+    palette.setColor(QPalette.ToolTipBase, Qt.white)
+    palette.setColor(QPalette.ToolTipText, Qt.white)
+    palette.setColor(QPalette.Text, Qt.white)
+    palette.setColor(QPalette.Disabled, QPalette.Text, disabledColor)
+    palette.setColor(QPalette.Button, button_color)
+    palette.setColor(QPalette.ButtonText, background_color)
+    palette.setColor(QPalette.Disabled, QPalette.ButtonText, disabledColor)
+    palette.setColor(QPalette.BrightText, Qt.red)
+    palette.setColor(QPalette.Link, QColor(42, 130, 218))
+    palette.setColor(QPalette.Highlight, QColor(42, 130, 218))
+    palette.setColor(QPalette.HighlightedText, Qt.black)
+    palette.setColor(QPalette.Disabled, QPalette.HighlightedText, disabledColor)
+    app.setPalette(palette)
+    app.setStyleSheet("QToolTip { color: #ffffff; background-color: #2a82da; border: 1px solid white; }")
+    """
+
     window = LightPlanStudio(app_name, version)
     time.sleep(2.5)
     window.show()
