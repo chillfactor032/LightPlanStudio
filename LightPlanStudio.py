@@ -246,6 +246,13 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         self.current_lightplan["lightplan"] = self.lightplan_gui_to_dict()
         self.current_lightplan["md5"] = hashlib.md5(str(self.current_lightplan["lightplan"]).encode("utf-8")).hexdigest()
 
+        # Initialize Window Geometry
+        geometry = self.settings.value("LightPlanStudio/geometry")
+        window_state = self.settings.value("LightPlanStudio/windowState")
+        if(geometry and window_state):
+            self.restoreGeometry(geometry) 
+            self.restoreState(window_state)
+
     ### Menu Signals #####
     def menu_click(self):
         sender = self.sender()
@@ -951,6 +958,10 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
             self.twitch.die()
         if(self.lightplan_runner is not None and self.lightplan_runner.is_running()):
             self.lightplan_runner.stop()
+        # Save Window Geometry
+        self.settings.setValue("LightPlanStudio/geometry", self.saveGeometry())
+        self.settings.setValue("LightPlanStudio/windowState", self.saveState())
+        self.settings.sync()
         return evt.accept()
     
     def get_parent_dir(self, path_str):
