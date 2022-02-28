@@ -4,17 +4,20 @@ import shutil
 import sys
 import json
 
-TEST_BUILD = True
+TEST_BUILD = False
+OUTPUT_FILE = "LightPlanStudio.exe"
+INPUT_FILE = "LightPlanStudio.py"
 
 # Specify Paths and Files
 cwd = os.getcwd()
 ui_path = os.path.join(cwd, "resources", "ui")
 destination_file = os.path.join(cwd, "UI_Components.py")
 resource_file = os.path.join(cwd, "LightPlanStudio.rc")
-
-
+output_path = os.path.join(cwd, "dist", OUTPUT_FILE)
 target_env = "windows"
 partial = False
+
+os.makedirs("dist", exist_ok=True)
 
 if(len(sys.argv)>1):
     if(sys.argv[1] == "partial"):
@@ -119,7 +122,8 @@ if(target_env == "windows"):
     cmd = f"py -m nuitka --onefile --standalone " \
             f"--enable-plugin=pyside6 --windows-icon-from-ico={version['ico']} " \
             f"{show_cmd}" \
-            "LightPlanStudio.py"
+            f" -o {output_path}" \
+            f" {INPUT_FILE}"
     
 proc = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 for c in iter(lambda: proc.stdout.read(1), b''):

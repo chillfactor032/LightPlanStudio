@@ -3,6 +3,7 @@
     <file>resources/img/lps_splash.png</file>
     <file>resources/img/icon.ico</file>
     <file>resources/img/loading.gif</file>
+    <file>resources/img/connected.gif</file>
     <file>version.json</file>
 </qresource>
 </RCC>

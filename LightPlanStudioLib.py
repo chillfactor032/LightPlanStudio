@@ -1,5 +1,4 @@
 #Python Imports
-import json
 import time
 import keyboard
 from enum import Enum
@@ -7,7 +6,7 @@ from enum import Enum
 #PySide6 Imports
 from PySide6.QtCore import QRunnable, Signal, Slot, QObject, Qt, QAbstractTableModel, QEvent
 from PySide6.QtWidgets import QLineEdit, QCheckBox, QComboBox, QMenu, QStyledItemDelegate, QStyle
-from PySide6.QtGui import QAction, QCursor
+from PySide6.QtGui import QAction, QCursor, QStandardItemModel
 
 #LightPlan Imports
 import irc.client
@@ -143,6 +142,18 @@ class LightPlanRunner(QRunnable):
         self.signals.log.emit(msg, level)
 
 
+class LightPlanTreeModel(QStandardItemModel):
+
+    def __init__(self):
+        super(LightPlanTreeModel, self).__init__()
+
+    def supportedDropActions(self):
+        return Qt.CopyAction | Qt.MoveAction
+
+    def dropMimeData(data, action, row, column, parent):
+        print(f"Drop Event")
+        print(data)
+
 class KeyListener(QRunnable):
 
     class Signals(QObject):
@@ -188,9 +199,11 @@ class TwitchIRC(QRunnable):
         log = Signal(str, LogLevel)
         irc_disconnect = Signal()
         irc_connect = Signal()
+        connect_failed = Signal()
 
     def __init__(self, nickname, token, channel, server="irc.chat.twitch.tv", port=6667):
         super(TwitchIRC, self).__init__()
+        self._connect_failed = True
         self.stop = False
         self.signals = self.Signals()
         self.connection = False
@@ -210,6 +223,7 @@ class TwitchIRC(QRunnable):
         
     def on_connect(self, connection, event):
         self.log("Connected to irc.chat.twitch.tv")
+        self._connect_failed = False
         connection.join(self.channel)
         self.signals.irc_connect.emit()
 
@@ -217,10 +231,14 @@ class TwitchIRC(QRunnable):
         self.log(f"Joined channel {self.channel}")
 
     def on_disconnect(self, connection, event):
-        self.log("Disconnected from irc.chat.twitch.tv")
+        if(self._connect_failed):
+            self.log("irc.chat.twitch.tv connection failed", LogLevel.ERROR)
+            self.signals.connect_failed.emit()
+        else:
+            self.log("Disconnected from irc.chat.twitch.tv")
+            self.signals.irc_disconnect.emit()
         self.stop = True
-        self.signals.irc_disconnect.emit()
-
+        
     def privmsg(self, text):
         if(self.connected()):
             self.log(f"Sent: {text}", LogLevel.DEBUG)

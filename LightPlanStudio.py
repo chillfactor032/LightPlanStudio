@@ -13,19 +13,21 @@ import hashlib
 
 # PySide6 Imports
 from PySide6.QtWidgets import (QApplication, QMainWindow, QStyle, 
-        QDialog, QInputDialog, QSplashScreen, 
-        QMessageBox,QAbstractItemView, 
-        QLineEdit, QFileDialog)
-from PySide6.QtCore import QFile, Slot, Signal, QObject, QThread, QStandardPaths, QSettings, QTextStream, Qt, QTimer, QThreadPool, QFileSystemWatcher, QUrl, QModelIndex
-from PySide6.QtUiTools import QUiLoader
-from PySide6.QtGui import QStandardItemModel, QStandardItem, QPixmap, QIcon, QMovie, QDesktopServices, QColor, QPalette
-from PySide6.QtMultimedia import QAudio, QAudioOutput, QMediaFormat, QMediaPlayer
+                            QDialog, QInputDialog, QSplashScreen, 
+                            QMessageBox,QAbstractItemView, 
+                            QLineEdit, QFileDialog, QMenu)
+from PySide6.QtCore import (QFile, Slot, Signal, QObject, QStandardPaths,
+                            QSettings, QTextStream, Qt, QTimer, QThreadPool, QFileSystemWatcher, \
+                            QUrl, QSize)
+from PySide6.QtGui import (QStandardItem, QPixmap, QIcon, QMovie, 
+                            QDesktopServices, QCursor, QAction)
+from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
 
 # LightPlanStudio Imports
 import Resources
 import UI_Components as UI
-from LightPlanStudioLib import YoutubeDownloader, LogLevel, LightPlanEvent, LightPlanTableModel, TwitchIRC, LightPlanRunner, KeyListener, KeyEventEater
+from LightPlanStudioLib import *
 
 class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
     def __init__(self, app_name, version):
@@ -107,10 +109,18 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         self.loading_dialog.setFixedSize(self.loading_pixmap.size())
         self.loading_dialog.setMovie(self.loading_movie)
         self.loading_dialog.hide()
+        self.connected_movie = QMovie(":resources/img/connected.gif")
+        self.connected_movie.setScaledSize(QSize(40,40))
+        self.connected_label.setText("")
+        self.connected_label.setMovie(self.connected_movie)
+        self.connected_movie.start()
+        self.connected_label.setHidden(True)
+        
         style = self.style()
         self.check_icon = style.standardIcon(QStyle.SP_DialogApplyButton)
         self.x_icon = style.standardIcon(QStyle.SP_DialogCloseButton)
         self.dir_icon = style.standardIcon(QStyle.SP_DirIcon)
+        self.connected_icon = style.standardIcon(QStyle.SP_DialogYesButton)
         self.play_icon = QIcon.fromTheme("media-playback-start.png", style.standardIcon(QStyle.SP_MediaPlay))
         self.pause_icon = QIcon.fromTheme("media-playback-pause.png", style.standardIcon(QStyle.SP_MediaPause))
         self.stop_icon = QIcon.fromTheme("media-playback-stop.png", style.standardIcon(QStyle.SP_MediaStop))
@@ -128,6 +138,12 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         self.event_table_view.setStyleSheet("QTableView:disabled {background-color:#ffffff;}")
         self.twitch_connect_button.setCheckable(True)
         self.control_startlp_button.setCheckable(True)
+        self.lp_tree_context_menu = QMenu()
+        self.lp_tree_context_delete_action = QAction("Delete LightPlan")
+        self.lp_tree_context_menu.addAction(self.lp_tree_context_delete_action)
+        self.lp_tree_context_delete_action.triggered.connect(self.lp_tree_delete_clicked)
+        self.lp_tree_view.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.lp_tree_view.customContextMenuRequested.connect(self.lptree_show_context_menu)
 
         #Set window Icon
         default_icon_pixmap = QStyle.StandardPixmap.SP_FileDialogListView
@@ -170,6 +186,7 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         self.keyevent_eater = KeyEventEater()
         self.insert_event_button.installEventFilter(self.keyevent_eater)
         self.expanded_tree_items = []
+        self.custom_cmds = []
 
         # Check for updated commands if UpdateCmdsOnStart = True
         update_cmds = valueToBool(self.settings.value("LightPlanStudio/UpdateCmdsOnStart", False))
@@ -180,9 +197,9 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
                 self.log("Updated Commands")
             else:
                 self.log("Could not update commands")
-
+        self.custom_cmds = self.settings.value("LightPlanStudio/UpdateCmdsOnStart", False)
         ## Event Table ##
-        self.lp_table_model = LightPlanTableModel(self.event_table_view, [], self.defaultCommands)
+        self.lp_table_model = LightPlanTableModel(self.event_table_view, [], self.get_commands())
         self.lp_table_model.action_set_start_event.triggered.connect(self.click_set_start_event)
         self.lp_table_model.dataChanged.connect(self.update_progressbar)
         self.control_lp_progressbar.valueChanged.connect(self.update_progressbar)
@@ -194,6 +211,7 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         self.action_open_lp.triggered.connect(self.menu_click)
         self.action_save_lp.triggered.connect(self.menu_click)
         self.action_open_lpdir.triggered.connect(self.menu_click)
+        self.action_open_configdir.triggered.connect(self.menu_click)
         self.action_exit.triggered.connect(self.menu_click)
         self.action_settings.triggered.connect(self.menu_click)
         self.action_show_log.triggered.connect(self.menu_click)
@@ -232,10 +250,14 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         self.set_status(self.status_msg)
 
         # LightPlan Explorer Tab
-        self.lp_tree_model = QStandardItemModel()
+        self.lp_tree_model = LightPlanTreeModel()
         self.lp_tree_model.setHorizontalHeaderLabels(['LightPlans'])
-        self.lp_tree_view.setIndentation(12)
         self.lp_tree_view.setModel(self.lp_tree_model)
+        self.lp_tree_view.setDragDropMode(QAbstractItemView.DropOnly)
+        self.lp_tree_view.viewport().setAcceptDrops(True)
+        self.lp_tree_view.setAcceptDrops(True)
+        self.lp_tree_view.setDropIndicatorShown(True)
+        self.lp_tree_view.setIndentation(12)
         self.lp_tree_view.doubleClicked.connect(self.lp_tree_doubleclicked)
         self.lp_tree_view.expanded.connect(self.lptree_item_expanded)
         self.lp_tree_view.collapsed.connect(self.lptree_item_collapsed)
@@ -264,6 +286,8 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
             self.click_save_button()
         elif(sender == self.action_open_lpdir):
             os.startfile(self.lightplan_dir)
+        elif(sender == self.action_open_configdir):
+            os.startfile(self.config_dir)
         elif(sender == self.action_exit):
             self.close()
         elif(sender == self.action_settings):
@@ -294,13 +318,7 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         self.refresh_lptree()
         self.file_watcher.addPath(self.lightplan_dir)
         for root, dirs, files in os.walk(self.lightplan_dir):
-            """
-            for file in files:
-                print(f"added {file}")
-                self.file_watcher.addPath(os.path.join(root, file))
-            """
             for dir in dirs:
-                print(f"added {dir}")
                 self.file_watcher.addPath(os.path.join(root, dir))
         self.file_watcher.directoryChanged.connect(self.refresh_lptree)
 
@@ -344,7 +362,8 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
                             # Create Parent Item if it doesnt exist
                             parent = QStandardItem(dir)
                             parent.setEditable(False)
-                            parent.setData(dir)
+                            parent.setData(dir, Qt.DisplayRole)
+                            parent.setData("Directory", Qt.UserRole)
                             parent.setIcon(self.dir_icon)
                             self.lp_tree_model.appendRow(parent)
                             obj["parent"] = parent
@@ -364,22 +383,24 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         for lp in self.lightplan_files:
             item = QStandardItem(lp["title"])
             item.setEditable(False)
-            item.setData(lp["path"])
+            item.setData(lp["path"], Qt.UserRole)
+            item.setData(lp["title"], Qt.DisplayRole)
             item.setIcon(self.lightplan_icon)
             artist_item = None
-            artist_items = self.lp_tree_model.findItems(lp["artist"])
+            artist_items = self.lp_tree_model.findItems(lp["artist"], Qt.MatchExactly)
 
             # Match the artist name to the artist item with the correct parent
             for ai in artist_items:
-                    if(ai.parent() == lp["parent"]):
-                        artist_item = ai
-                        break
+                if(ai.parent() == lp["parent"]):
+                    artist_item = ai
+                    break
             
             # If artist not matched, create the artist item with correct parent
             if(artist_item is None):
                 artist_item = QStandardItem(lp["artist"])
                 artist_item.setEditable(False)
-                artist_item.setData(lp["artist"])
+                artist_item.setData(lp["artist"], Qt.DisplayRole)
+                artist_item.setData("Artist", Qt.UserRole)
                 if(lp["parent"] is not None):
                     lp["parent"].appendRow(artist_item)
                 else:
@@ -429,10 +450,33 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
     def lp_tree_doubleclicked(self):
         index = self.lp_tree_view.selectedIndexes()[0]
         selected = index.model().itemFromIndex(index)
-        if(len(selected.data())>0):
-            data = selected.data()
+        if(selected.data(Qt.UserRole) not in ["Artist", "Directory"]):
+            data = selected.data(Qt.UserRole)
             self.check_save_lightplan()
             self.open_lp_file(data)
+
+    def lptree_show_context_menu(self):
+        self.lp_tree_context_menu.popup(QCursor.pos())
+
+    def lp_tree_delete_clicked(self):
+        index = self.lp_tree_view.currentIndex()
+        selected = index.model().itemFromIndex(index)
+        if(selected.data(Qt.UserRole) not in ["Artist", "Directory"]):
+            parent = selected.parent()
+            artist = ""
+            if(parent is not None):
+                artist = parent.data(Qt.DisplayRole)
+            title = selected.data(Qt.DisplayRole)
+            choice = QMessageBox.question(self, 
+                "LightPlan Studio",
+                f"Are you sure you want to delete LightPlan?\n{artist} - {title}",
+                (QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No),
+                QMessageBox.StandardButton.No)
+            path = selected.data(Qt.UserRole)
+            if(os.path.exists(path) and choice == QMessageBox.StandardButton.Yes):
+                self.log(f"Deleted: {artist} - {title}")
+                self.log(f"Deleted: {path}", LogLevel.DEBUG)
+                os.remove(path)
 
     def clear_lightplan(self):
         self.lp_songtitle_edit.clear()
@@ -696,6 +740,7 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
     def click_twitch_connect_button(self):
         if(self.twitch and self.twitch.connected()):
             self.twitch.die()
+            self.twitch_connect_button.setChecked(False)
         else:
             user_name = self.settings.value("Twitch/Username", "")
             token = self.settings.value("Twitch/OAuthToken", "")
@@ -704,17 +749,32 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
             self.twitch.signals.log.connect(self.log)
             self.twitch.signals.irc_disconnect.connect(self.twitch_disconnect)
             self.twitch.signals.irc_connect.connect(self.twitch_connect)
+            self.twitch.signals.connect_failed.connect(self.twitch_connect_failed)
             self.threadpool.start(self.twitch)
+            self.twitch_connect_button.setChecked(True)
 
     def twitch_connect(self):
         self.twitch_connect_button.setText("Disconnect Twitch")
         self.calc_delay_button.setEnabled(True)
         self.control_startlp_button.setEnabled(True)
+        self.twitch_connect_button.setChecked(True)
+        self.connected_label.setHidden(False)
 
     def twitch_disconnect(self):
         self.twitch_connect_button.setText("Connect Twitch")
         self.calc_delay_button.setEnabled(False)
         self.control_startlp_button.setEnabled(False)
+        self.twitch_connect_button.setChecked(False)
+        self.connected_label.setHidden(True)
+
+    def twitch_connect_failed(self):
+        choice = QMessageBox.warning(self, 
+            "LightPlan Studio", 
+            "Twitch IRC Connection Failed.\n\nDo you want to try again?",
+            (QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No),
+            QMessageBox.StandardButton.Yes)
+        if(choice == QMessageBox.StandardButton.Yes):
+            self.click_twitch_connect_button()
 
     ## Event Wizard Functions ##
 
@@ -770,6 +830,7 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
 
     def download_complete(self, result, data=None):
         if(not result):
+            self.song_loaded_status_label.setText("No Song Loaded")
             return
         self.song_file_path = data["audio_path"]
         self.song_image_path = data["image_path"]
@@ -782,7 +843,9 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         self.insert_event_button.setEnabled(True)
         self.stop_button.setEnabled(True)
         self.song_loaded_status_icon.setPixmap(self.check_icon.pixmap(self.song_loaded_status_icon.width(), self.song_loaded_status_icon.height()))
-        self.song_loaded_status_label.setText("Song Loaded")
+        filename = os.path.basename(self.song_file_path)
+        self.song_loaded_status_label.setText(f"File Loaded Successfully")
+        self.set_status(f"File Loaded Successfully", 3000)
         self.loading(False)
         
     def song_slider_released(self):
@@ -878,7 +941,21 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
 
     def delay_slider_released(self):
         self.log(f"Stream Delay Adjustment: {self.delay_adjust_ms} ms", LogLevel.DEBUG)
-        
+    
+    ## More Functions ##
+
+    def get_commands(self):
+        custom_cmds_json = self.settings.value("LightPlanStudio/CustomCmds", "[]")
+        try:
+            self.custom_cmds = json.loads(custom_cmds_json)
+        except json.decoder.JSONDecodeError as e:
+            self.log("JSONDecodeError parsing custom commands", LogLevel.ERROR)
+            self.log(str(e), LogLevel.DEBUG)
+            self.custom_cmds = []
+        all_commands = self.custom_cmds + self.defaultCommands
+        return all_commands
+
+
     def click_hidelog_button(self):
         self.setFixedSize(self.defaultWidth, self.height)
         self.action_show_log.setChecked(False)
@@ -923,6 +1000,7 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
             self.lightplan_dir = self.settings.value("LightPlanStudio/LightPlanDir", self.default_lightplan_dir)
             #self.checkStartSSLIntegration()
             self.reset_fswatcher()
+            self.lp_table_model.update_commands(self.get_commands())
             self.set_status("Settings Saved", 2500)
             self.log("Settings Saved")
     
@@ -1165,7 +1243,8 @@ class SettingsDialog(QDialog):
     def saveButtonClick(self):
         self.settings.setValue("StreamerSongList/IntegrationEnabled", self.ui.sslCheckBox.isChecked())
         self.settings.setValue("Twitch/Username", self.ui.userEdit.text())
-        self.settings.setValue("Twitch/OAuthToken", self.ui.oauthEdit.text())
+        token = self.ui.oauthEdit.text().replace("oauth:", "")
+        self.settings.setValue("Twitch/OAuthToken", token)
         self.settings.setValue("Twitch/Channel", self.ui.channelEdit.text())
         self.settings.setValue("LightPlanStudio/ShowLogOnStart", self.ui.showLogCheckBox.isChecked())
         self.settings.setValue("LightPlanStudio/UpdateCmdsOnStart", self.ui.updateCommandsCheckBox.isChecked())

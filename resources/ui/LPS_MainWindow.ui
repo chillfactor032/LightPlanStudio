@@ -39,6 +39,15 @@
         <height>291</height>
        </rect>
       </property>
+      <property name="acceptDrops">
+       <bool>true</bool>
+      </property>
+      <property name="dragDropMode">
+       <enum>QAbstractItemView::DropOnly</enum>
+      </property>
+      <property name="defaultDropAction">
+       <enum>Qt::CopyAction</enum>
+      </property>
       <property name="alternatingRowColors">
        <bool>true</bool>
       </property>
@@ -609,6 +618,19 @@
       <string/>
      </property>
     </widget>
+    <widget class="QLabel" name="connected_label">
+     <property name="geometry">
+      <rect>
+       <x>180</x>
+       <y>73</y>
+       <width>40</width>
+       <height>40</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>0</string>
+     </property>
+    </widget>
    </widget>
    <widget class="QTextEdit" name="debug_log_edit">
     <property name="geometry">
@@ -794,9 +816,9 @@ p, li { white-space: pre-wrap; }
     <widget class="QLabel" name="song_loaded_status_label">
      <property name="geometry">
       <rect>
-       <x>400</x>
+       <x>120</x>
        <y>20</y>
-       <width>101</width>
+       <width>381</width>
        <height>20</height>
       </rect>
      </property>
@@ -840,6 +862,7 @@ p, li { white-space: pre-wrap; }
     <addaction name="action_save_lp"/>
     <addaction name="separator"/>
     <addaction name="action_open_lpdir"/>
+    <addaction name="action_open_configdir"/>
     <addaction name="separator"/>
     <addaction name="action_exit"/>
    </widget>
@@ -936,6 +959,11 @@ p, li { white-space: pre-wrap; }
   <action name="action_open_lpdir">
    <property name="text">
     <string>Open LightPlan Directory</string>
+   </property>
+  </action>
+  <action name="action_open_configdir">
+   <property name="text">
+    <string>Open Config Directory</string>
    </property>
   </action>
  </widget>
