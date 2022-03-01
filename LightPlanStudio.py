@@ -54,15 +54,25 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         self.documents_dir =  QStandardPaths.writableLocation(QStandardPaths.DocumentsLocation)
         self.temp_dir = os.path.join(QStandardPaths.writableLocation(QStandardPaths.TempLocation), "LightPlanStudio")
         self.config_dir = QStandardPaths.writableLocation(QStandardPaths.ConfigLocation)
+        
+        os.makedirs(self.config_dir, exist_ok=True)
         if(not os.path.isdir(self.config_dir)):
-            os.mkdir(self.config_dir)
+            QMessageBox.critical(self, "LightPlan Studio", f"Could not create config directory!\n\n{self.config_dir}")
+            return
+
         self.ini_path = os.path.join(self.config_dir, "LightPlanStudio.ini").replace("\\", "/")
         self.default_lightplan_dir = os.path.join(self.config_dir, "LightPlans").replace("\\", "/")
         self.audio_dir = os.path.join(self.config_dir, "Audio").replace("\\", "/")
+
+        os.makedirs(self.default_lightplan_dir, exist_ok=True)
         if(not os.path.isdir(self.default_lightplan_dir)):
-            os.mkdir(self.default_lightplan_dir)
+            QMessageBox.critical(self, "LightPlan Studio", f"Could not create default LightPlan directory!\n\n{self.default_lightplan_dir}")
+            return
+        
+        os.makedirs(self.audio_dir, exist_ok=True)
         if(not os.path.isdir(self.audio_dir)):
-            os.mkdir(self.audio_dir)
+            QMessageBox.critical(self, "LightPlan Studio", f"Could not create audio cache directory!\n\n{self.audio_dir}")
+            return
 
         #Get Settings
         self.settings = QSettings(self.ini_path, QSettings.IniFormat)
