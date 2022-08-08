@@ -57,7 +57,7 @@
      <attribute name="title">
       <string>SSL Queue</string>
      </attribute>
-     <widget class="QTableWidget" name="ssl_queue_table">
+     <widget class="QWidget" name="verticalLayoutWidget">
       <property name="geometry">
        <rect>
         <x>10</x>
@@ -66,6 +66,21 @@
         <height>291</height>
        </rect>
       </property>
+      <layout class="QVBoxLayout" name="ssl_layout">
+       <item>
+        <spacer name="verticalSpacer">
+         <property name="orientation">
+          <enum>Qt::Vertical</enum>
+         </property>
+         <property name="sizeHint" stdset="0">
+          <size>
+           <width>20</width>
+           <height>40</height>
+          </size>
+         </property>
+        </spacer>
+       </item>
+      </layout>
      </widget>
     </widget>
    </widget>

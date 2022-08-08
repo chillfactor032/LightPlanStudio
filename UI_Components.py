@@ -143,8 +143,8 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication, QDoubleSpinBox, 
     QGroupBox, QHeaderView, QLCDNumber, QLabel,
     QLineEdit, QMainWindow, QMenu, QMenuBar,
     QPlainTextEdit, QProgressBar, QPushButton, QSizePolicy,
-    QSlider, QStatusBar, QTabWidget, QTableView,
-    QTableWidget, QTableWidgetItem, QTextEdit, QTreeView,
+    QSlider, QSpacerItem, QStatusBar, QTabWidget,
+    QTableView, QTextEdit, QTreeView, QVBoxLayout,
     QWidget)
 
 class Ui_LPS_MainWindow(object):
@@ -198,9 +198,16 @@ class Ui_LPS_MainWindow(object):
         self.tabWidget.addTab(self.lightPlanTab, "")
         self.sslTab = QWidget()
         self.sslTab.setObjectName(u"sslTab")
-        self.ssl_queue_table = QTableWidget(self.sslTab)
-        self.ssl_queue_table.setObjectName(u"ssl_queue_table")
-        self.ssl_queue_table.setGeometry(QRect(10, 10, 201, 291))
+        self.verticalLayoutWidget = QWidget(self.sslTab)
+        self.verticalLayoutWidget.setObjectName(u"verticalLayoutWidget")
+        self.verticalLayoutWidget.setGeometry(QRect(10, 10, 201, 291))
+        self.ssl_layout = QVBoxLayout(self.verticalLayoutWidget)
+        self.ssl_layout.setObjectName(u"ssl_layout")
+        self.ssl_layout.setContentsMargins(0, 0, 0, 0)
+        self.verticalSpacer = QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Expanding)
+
+        self.ssl_layout.addItem(self.verticalSpacer)
+
         self.tabWidget.addTab(self.sslTab, "")
         self.LightPlanBox = QGroupBox(self.centralwidget)
         self.LightPlanBox.setObjectName(u"LightPlanBox")

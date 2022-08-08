@@ -5,7 +5,7 @@ https://lightplanstudio.com
 
 ## Getting Started
 
-To get started, grab the latest [Release](https://github.com/chillfactor032/LightPlanStudio/releases) from the release links on the right this Github repository.
+To get started, grab the latest [Release](https://github.com/chillfactor032/LightPlanStudio/releases) from the release links on the right side menu of this Github repository.
 
  - Run the exe a explore the GUI.
  - Pick out a song and create a LightPlan.

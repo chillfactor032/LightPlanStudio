@@ -1,17 +1,19 @@
 #Python Imports
 import time
 import keyboard
+import requests
 from enum import Enum
 
 #PySide6 Imports
 from PySide6.QtCore import QRunnable, Signal, Slot, QObject, Qt, QAbstractTableModel, QEvent
-from PySide6.QtWidgets import QLineEdit, QCheckBox, QComboBox, QMenu, QStyledItemDelegate, QStyle
+from PySide6.QtWidgets import QLineEdit, QCheckBox, QComboBox, QMenu, QStyledItemDelegate, QStyle, QPushButton
 from PySide6.QtGui import QAction, QCursor, QStandardItemModel
 
 #LightPlan Imports
 import irc.client
 from twitchio.ext import commands
 from pytube import YouTube
+import socketio
 
 #Log Levels
 class LogLevel(Enum):
@@ -25,6 +27,117 @@ class LogLevel(Enum):
             if(value == level.value):
                 return level
         return LogLevel.INFO
+
+
+class SSLButton(QPushButton):
+    def __init__(self, *args, **kwargs):
+        self.data = {}
+        super().__init__(*args, **kwargs)
+
+    def setData(self, data):
+        self.data = data
+    
+class StreamerSongList(QRunnable):
+
+    class Signals(QObject):
+        log = Signal(str, LogLevel)
+        disconnected = Signal()
+        connected = Signal()
+        join_room = Signal()
+        queue_update = Signal(dict)
+
+    def __init__(self, ssl_id=0, url="https://api.streamersonglist.com"):
+        super(StreamerSongList, self).__init__()
+        self.signals = self.Signals()
+        self.sio = socketio.Client()
+        self.ssl_id = ssl_id
+        self.ssl_user = ""
+        self.url = url
+        self.sio.on("connect", self.connectEvent)
+        self.sio.on("connect_error", self.connectErrorEvent)
+        self.sio.on("disconnect", self.disconnectEvent)
+        self.sio.on("queue-update", self.queue_update)
+        self._connected = False
+
+    @Slot()
+    def run(self):
+        self.sio.connect(self.url)
+        self.sio.wait()
+    
+    def close(self):
+        self.sio.disconnect()
+
+    def fetch_queue(self):
+        if not self._connected:
+            return
+        url = f"https://api.streamersonglist.com/v1/streamers/{self.ssl_id}/queue"
+        self.log(f"Fetching SSL Queue via HTTP: {url}", LogLevel.DEBUG)
+        r = requests.get(url)
+        if not r.status_code == 200:
+            self.log(f"Error fetching SSL Queue: HTTP Status [{r.status_code}]", LogLevel.ERROR)
+            return
+        jsonObj = r.json()
+        self.queue_update(jsonObj)
+
+    def queue_update(self, data):
+        self.log(f"SSL Queue Update Event", LogLevel.DEBUG)
+        queue = []
+        for item in data["list"]:
+            song = item["song"]
+            queue.append(song)
+        self.log(f"{queue}", LogLevel.DEBUG)
+        self.signals.queue_update.emit(queue)
+
+    def connectEvent(self):
+        self._connected = True
+        self.log(f"SSL Status: Connected", LogLevel.INFO)
+        self.sio.emit("join-room", str(self.ssl_id))
+        self.signals.log.emit(f"Joined room {self.ssl_id}", LogLevel.INFO)
+        self.fetch_queue()
+
+    def connectErrorEvent(self, msg=""):
+        self.signals.log.emit(f"Connection to StreamerSongList Failed", LogLevel.ERROR)
+        self.signals.log.emit(msg, LogLevel.ERROR)
+
+    def disconnectEvent(self):
+        self._connected = False
+        self.signals.log.emit(f"Disconnected to StreamerSongList", LogLevel.INFO)
+        self.signals.disconnected.emit()
+
+    def disconnect(self):
+        self.sio.disconnect()
+
+    def update_sslid(self, ssl_id):
+        self.ssl_id = ssl_id
+
+    def sslId_from_user(self, ssl_user):
+        url = "https://api.streamersonglist.com/v1/streamers/"+str(ssl_user)
+        response = requests.get(url)
+        id = 0
+        if(response.status_code == 200):
+            try:
+                jsonObj = response.json()
+                id = jsonObj["id"]
+            except ValueError as err:
+                self.log(repr(err), LogLevel.ERROR)
+                id = 0
+                return False
+        if(id != 0):
+            self.ssl_id = id
+            self.ssl_user = ssl_user
+            self.log(f"SSL ID Retrieved: {id}")
+            return True
+        else:
+            return False
+
+    def get_user(self):
+        return self.ssl_user
+
+    def connected(self):
+        return self._connected
+
+    def log(self, msg, level=LogLevel.INFO):
+        self.signals.log.emit(msg, level)
 
 
 class LightPlanRunner(QRunnable):

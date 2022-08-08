@@ -20,7 +20,7 @@ from PySide6.QtCore import (QFile, Slot, Signal, QObject, QStandardPaths,
                             QSettings, QTextStream, Qt, QTimer, QThreadPool, QFileSystemWatcher, \
                             QUrl, QSize)
 from PySide6.QtGui import (QStandardItem, QPixmap, QIcon, QMovie, 
-                            QDesktopServices, QCursor, QAction)
+                            QDesktopServices, QCursor, QAction, QIntValidator)
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
 
@@ -154,6 +154,8 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         self.lp_tree_context_delete_action.triggered.connect(self.lp_tree_delete_clicked)
         self.lp_tree_view.setContextMenuPolicy(Qt.CustomContextMenu)
         self.lp_tree_view.customContextMenuRequested.connect(self.lptree_show_context_menu)
+        int_validator = QIntValidator(self)
+        self.lp_sslid_edit.setValidator(int_validator)
 
         #Set window Icon
         default_icon_pixmap = QStyle.StandardPixmap.SP_FileDialogListView
@@ -197,6 +199,7 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         self.insert_event_button.installEventFilter(self.keyevent_eater)
         self.expanded_tree_items = []
         self.custom_cmds = []
+        self.ssl_queue_buttons = []
 
         # Check for updated commands if UpdateCmdsOnStart = True
         update_cmds = valueToBool(self.settings.value("LightPlanStudio/UpdateCmdsOnStart", False))
@@ -273,6 +276,9 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         self.lp_tree_view.collapsed.connect(self.lptree_item_collapsed)
         self.reset_fswatcher()
 
+        # StreamerSongList Integration
+        self.streamer_song_list = StreamerSongList(0)
+
         #Set initial lightplan
         self.current_lightplan = {"path": None}
         self.current_lightplan["lightplan"] = self.lightplan_gui_to_dict()
@@ -284,6 +290,7 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         if(geometry and window_state):
             self.restoreGeometry(geometry) 
             self.restoreState(window_state)
+        self.refresh_ssl_layout()
 
     ### Menu Signals #####
     def menu_click(self):
@@ -319,6 +326,104 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
                 QMessageBox.information(self, "LightPlan Studio", "Commands have been updated.")
             else:
                 QMessageBox.information(self, "LightPlan Studio", "Commands are up to date.")
+    
+    ## SSL Integration Functions
+    def check_start_ssl_connection(self):
+        ssl_int = valueToBool(self.settings.value("StreamerSongList/IntegrationEnabled", False))
+
+        #IF ssl integration not enabled, do nothing
+        if(not ssl_int):
+            return
+
+        user = self.settings.value("Twitch/Channel", "").strip()
+        #If user is blank, do nothing
+        if(len(user) <= 0):
+            return
+
+        #If user hasnt changed and still connected, dont do anything
+        if(user == self.streamer_song_list.get_user() and self.streamer_song_list.connected()):
+            return
+
+        #If connected, disconnect
+        if(self.streamer_song_list.connected()):
+            self.streamer_song_list.disconnect()
+        
+        #Create new ssl object
+        self.streamer_song_list = StreamerSongList()
+        
+        #Map the channel user to an SSL Id
+        if not self.streamer_song_list.sslId_from_user(user):
+            self.log(f"Could not map user [{user}] to ssl id", LogLevel.ERROR)
+            return
+
+        #Map signals to slots
+        self.streamer_song_list.signals.disconnected.connect(self.ssl_disconnected)
+        self.streamer_song_list.signals.connected.connect(self.ssl_connected)
+        self.streamer_song_list.signals.queue_update.connect(self.ssl_queue_update)
+        self.streamer_song_list.signals.log.connect(self.log)
+
+        # Start the thread
+        self.threadpool.start(self.streamer_song_list)
+        
+
+    ## SSL Integration Slots
+
+    def refresh_ssl_layout(self, ssl_queue=[]):
+        for button in self.ssl_queue_buttons:
+            self.ssl_layout.removeWidget(button)
+            button.deleteLater()
+        self.ssl_queue_buttons.clear()
+        
+        for song in ssl_queue:
+            text = f"{song['title']} - {song['artist']}"
+            if len(text) > 25:
+                text = text[:25] + "..."
+            button = SSLButton(text, self)
+            button.data = song
+            button.clicked.connect(self.ssl_button_clicked)
+            self.ssl_queue_buttons.append(button)
+
+        self.ssl_queue_buttons.reverse()
+
+        for button in self.ssl_queue_buttons:
+            self.ssl_layout.insertWidget(0, button)
+
+    def ssl_button_clicked(self):
+        sender = self.sender()
+        self.log("SSL Button Clicked", LogLevel.DEBUG)
+        self.log(sender.data, LogLevel.DEBUG)
+        lp = sender.data
+        if not lp:
+            return
+        self.open_lp_file(lp["path"])
+        self.click_start_lightplan()
+
+    def ssl_connected(self):
+        self.log("Event Connected to StreamerSongList")
+    
+    def ssl_disconnected(self):
+        self.log("Event Disconnected from StreamerSongList")
+    
+    def ssl_queue_update(self, queue_dict):
+        size = len(queue_dict)
+        self.log(f"SSL: Queue Update Event ({size})")
+        self.log(str(queue_dict), LogLevel.DEBUG)
+        #Map SSL Queue Songs to LightPlans
+        queue = []
+        for song in queue_dict:
+            if song is None:
+                continue
+            for lpf in self.lightplan_files:
+                try:
+                    ssl_id = int(lpf["ssl_id"])
+                except ValueError as ve:
+                    ssl_id = 0
+                if song["id"] == ssl_id:
+                    queue.append(lpf)
+                    title = lpf["title"]
+                    artist = lpf["artist"]
+                    self.log(f"Matched SSL Song: {artist} - {title}", LogLevel.DEBUG)
+        self.refresh_ssl_layout(queue)
     
     # Setup FileSystemWatcher To keep the LP Explorer Updated
     def reset_fswatcher(self):
@@ -554,8 +659,14 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         self.lp_songtitle_edit.setText(lightplan_dict["song_title"])
         self.lp_artist_edit.setText(lightplan_dict["song_artist"])
         self.lp_author_edit.setText(lightplan_dict["author"])
-        self.lp_sslid_edit.setText(lightplan_dict["ssl_id"])
-        self.lp_spotifyid_edit.setText(lightplan_dict["spotify_id"])
+        ssl_id = str(lightplan_dict["ssl_id"])
+        if ssl_id == "0":
+            ssl_id = ""
+        spotify_id = str(lightplan_dict["spotify_id"])
+        if spotify_id == "0":
+            spotify_id = ""
+        self.lp_sslid_edit.setText(ssl_id)
+        self.lp_spotifyid_edit.setText(spotify_id)
         self.lp_youtubeurl_edit.setText(lightplan_dict["youtube_url"])
         self.lp_notes_edit.setPlainText(lightplan_dict["notes"])
         self.start_event_edit.setText(msToStr(lightplan_dict["starting_ms"], True))
@@ -581,8 +692,8 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
             "song_title": "",
             "song_artist": "",
             "author": "",
-            "ssl_id": "",
-            "spotify_id": "",
+            "ssl_id": 0,
+            "spotify_id": 0,
             "youtube_url": "",
             "notes": "",
             "starting_ms": 0,
@@ -591,8 +702,16 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         lightplan_dict["song_title"] = self.lp_songtitle_edit.text().strip()
         lightplan_dict["song_artist"] = self.lp_artist_edit.text().strip()
         lightplan_dict["author"] = self.lp_author_edit.text().strip()
-        lightplan_dict["ssl_id"] = self.lp_sslid_edit.text().strip()
-        lightplan_dict["spotify_id"] = self.lp_spotifyid_edit.text().strip()
+        try:
+            ssl_id = int(self.lp_sslid_edit.text().strip())
+        except ValueError as ve:
+            ssl_id = 0
+        try:
+            spotify_id = int(self.lp_spotifyid_edit.text().strip())
+        except ValueError as ve:
+            spotify_id = 0
+        lightplan_dict["ssl_id"] = ssl_id
+        lightplan_dict["spotify_id"] = spotify_id
         lightplan_dict["youtube_url"] = self.lp_youtubeurl_edit.text().strip()
         lightplan_dict["notes"] = self.lp_notes_edit.toPlainText().strip()
         lightplan_dict["starting_ms"] = strToMs(self.start_event_edit.text().strip())
@@ -751,6 +870,8 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         if(self.twitch and self.twitch.connected()):
             self.twitch.die()
             self.twitch_connect_button.setChecked(False)
+            if(self.streamer_song_list.connected()):
+                self.streamer_song_list.disconnect()
         else:
             user_name = self.settings.value("Twitch/Username", "")
             token = self.settings.value("Twitch/OAuthToken", "")
@@ -762,6 +883,7 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
             self.twitch.signals.connect_failed.connect(self.twitch_connect_failed)
             self.threadpool.start(self.twitch)
             self.twitch_connect_button.setChecked(True)
+            self.check_start_ssl_connection()
 
     def twitch_connect(self):
         self.twitch_connect_button.setText("Disconnect Twitch")
@@ -1046,6 +1168,8 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
             self.twitch.die()
         if(self.lightplan_runner is not None and self.lightplan_runner.is_running()):
             self.lightplan_runner.stop()
+        if(self.streamer_song_list.connected()):
+            self.streamer_song_list.disconnect()
         # Save Window Geometry
         self.settings.setValue("LightPlanStudio/geometry", self.saveGeometry())
         self.settings.setValue("LightPlanStudio/windowState", self.saveState())
