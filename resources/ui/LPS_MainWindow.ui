@@ -215,7 +215,7 @@
       <rect>
        <x>340</x>
        <y>60</y>
-       <width>181</width>
+       <width>141</width>
        <height>20</height>
       </rect>
      </property>
@@ -351,6 +351,19 @@
      <attribute name="verticalHeaderVisible">
       <bool>false</bool>
      </attribute>
+    </widget>
+    <widget class="QPushButton" name="ssl_lookup_button">
+     <property name="geometry">
+      <rect>
+       <x>490</x>
+       <y>58</y>
+       <width>29</width>
+       <height>24</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string/>
+     </property>
     </widget>
    </widget>
    <widget class="QGroupBox" name="streamDelayBox">

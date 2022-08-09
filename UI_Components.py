@@ -244,7 +244,7 @@ class Ui_LPS_MainWindow(object):
         self.label_5.setGeometry(QRect(300, 60, 41, 21))
         self.lp_sslid_edit = QLineEdit(self.LightPlanBox)
         self.lp_sslid_edit.setObjectName(u"lp_sslid_edit")
-        self.lp_sslid_edit.setGeometry(QRect(340, 60, 181, 20))
+        self.lp_sslid_edit.setGeometry(QRect(340, 60, 141, 20))
         self.lp_spotifyid_edit = QLineEdit(self.LightPlanBox)
         self.lp_spotifyid_edit.setObjectName(u"lp_spotifyid_edit")
         self.lp_spotifyid_edit.setGeometry(QRect(340, 90, 181, 20))
@@ -280,6 +280,9 @@ class Ui_LPS_MainWindow(object):
         self.event_table_view.setSortingEnabled(True)
         self.event_table_view.setWordWrap(False)
         self.event_table_view.verticalHeader().setVisible(False)
+        self.ssl_lookup_button = QPushButton(self.LightPlanBox)
+        self.ssl_lookup_button.setObjectName(u"ssl_lookup_button")
+        self.ssl_lookup_button.setGeometry(QRect(490, 58, 29, 24))
         self.streamDelayBox = QGroupBox(self.centralwidget)
         self.streamDelayBox.setObjectName(u"streamDelayBox")
         self.streamDelayBox.setGeometry(QRect(560, 360, 231, 181))
@@ -491,6 +494,7 @@ class Ui_LPS_MainWindow(object):
         self.lp_save_button.setText(QCoreApplication.translate("LPS_MainWindow", u"Save", None))
         self.label_14.setText(QCoreApplication.translate("LPS_MainWindow", u"LightPlan Start:", None))
         self.start_event_edit.setText(QCoreApplication.translate("LPS_MainWindow", u"00:00.000", None))
+        self.ssl_lookup_button.setText("")
         self.streamDelayBox.setTitle(QCoreApplication.translate("LPS_MainWindow", u"Stream Delay", None))
         self.calc_delay_button.setText(QCoreApplication.translate("LPS_MainWindow", u"Calculate", None))
         self.label_10.setText(QCoreApplication.translate("LPS_MainWindow", u"Runtime Adjust:", None))
@@ -670,6 +674,81 @@ class Ui_SettingsDialog(object):
         self.label_5.setText(QCoreApplication.translate("SettingsDialog", u"LightPlan Directory:", None))
         self.dir_browse_button.setText(QCoreApplication.translate("SettingsDialog", u"Browse", None))
         self.dir_default_button.setText(QCoreApplication.translate("SettingsDialog", u"Default", None))
+    # retranslateUi
+
+
+
+# -*- coding: utf-8 -*-
+
+################################################################################
+## Form generated from reading UI file 'LPS_SSLMatchDialog.ui'
+##
+## Created by: Qt User Interface Compiler version 6.2.2
+##
+## WARNING! All changes made in this file will be lost when recompiling UI file!
+################################################################################
+
+from PySide6.QtCore import (QCoreApplication, QDate, QDateTime, QLocale,
+    QMetaObject, QObject, QPoint, QRect,
+    QSize, QTime, QUrl, Qt)
+from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
+    QFont, QFontDatabase, QGradient, QIcon,
+    QImage, QKeySequence, QLinearGradient, QPainter,
+    QPalette, QPixmap, QRadialGradient, QTransform)
+from PySide6.QtWidgets import (QAbstractItemView, QApplication, QDialog, QHeaderView,
+    QLabel, QLineEdit, QProgressBar, QPushButton,
+    QSizePolicy, QTableWidget, QTableWidgetItem, QWidget)
+
+class Ui_SSLMatchDialog(object):
+    def setupUi(self, SSLMatchDialog):
+        if not SSLMatchDialog.objectName():
+            SSLMatchDialog.setObjectName(u"SSLMatchDialog")
+        SSLMatchDialog.resize(277, 347)
+        self.save_button = QPushButton(SSLMatchDialog)
+        self.save_button.setObjectName(u"save_button")
+        self.save_button.setGeometry(QRect(100, 310, 75, 24))
+        self.cancel_button = QPushButton(SSLMatchDialog)
+        self.cancel_button.setObjectName(u"cancel_button")
+        self.cancel_button.setGeometry(QRect(190, 310, 75, 24))
+        self.status_label = QLabel(SSLMatchDialog)
+        self.status_label.setObjectName(u"status_label")
+        self.status_label.setGeometry(QRect(10, 10, 251, 21))
+        self.song_table = QTableWidget(SSLMatchDialog)
+        if (self.song_table.columnCount() < 2):
+            self.song_table.setColumnCount(2)
+        self.song_table.setObjectName(u"song_table")
+        self.song_table.setGeometry(QRect(10, 71, 256, 231))
+        self.song_table.setAlternatingRowColors(True)
+        self.song_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.song_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.song_table.setSortingEnabled(True)
+        self.song_table.setColumnCount(2)
+        self.song_table.horizontalHeader().setStretchLastSection(True)
+        self.song_table.verticalHeader().setVisible(False)
+        self.search_edit = QLineEdit(SSLMatchDialog)
+        self.search_edit.setObjectName(u"search_edit")
+        self.search_edit.setGeometry(QRect(52, 40, 211, 22))
+        self.label = QLabel(SSLMatchDialog)
+        self.label.setObjectName(u"label")
+        self.label.setGeometry(QRect(10, 40, 49, 21))
+        self.progress = QProgressBar(SSLMatchDialog)
+        self.progress.setObjectName(u"progress")
+        self.progress.setGeometry(QRect(10, 310, 81, 23))
+        self.progress.setMaximum(0)
+        self.progress.setValue(0)
+        self.progress.setTextVisible(False)
+
+        self.retranslateUi(SSLMatchDialog)
+
+        QMetaObject.connectSlotsByName(SSLMatchDialog)
+    # setupUi
+
+    def retranslateUi(self, SSLMatchDialog):
+        SSLMatchDialog.setWindowTitle(QCoreApplication.translate("SSLMatchDialog", u"Dialog", None))
+        self.save_button.setText(QCoreApplication.translate("SSLMatchDialog", u"Save", None))
+        self.cancel_button.setText(QCoreApplication.translate("SSLMatchDialog", u"Cancel", None))
+        self.status_label.setText(QCoreApplication.translate("SSLMatchDialog", u"asdf", None))
+        self.label.setText(QCoreApplication.translate("SSLMatchDialog", u"Search:", None))
     # retranslateUi
 
 

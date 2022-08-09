@@ -10,12 +10,13 @@ from pytube import YouTube
 from pathlib import Path
 from enum import Enum
 import hashlib
+import sqlite3
 
 # PySide6 Imports
 from PySide6.QtWidgets import (QApplication, QMainWindow, QStyle, 
                             QDialog, QInputDialog, QSplashScreen, 
                             QMessageBox,QAbstractItemView, 
-                            QLineEdit, QFileDialog, QMenu)
+                            QLineEdit, QFileDialog, QMenu, QTableWidgetItem)
 from PySide6.QtCore import (QFile, Slot, Signal, QObject, QStandardPaths,
                             QSettings, QTextStream, Qt, QTimer, QThreadPool, QFileSystemWatcher, \
                             QUrl, QSize)
@@ -63,6 +64,7 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         self.ini_path = os.path.join(self.config_dir, "LightPlanStudio.ini").replace("\\", "/")
         self.default_lightplan_dir = os.path.join(self.config_dir, "LightPlans").replace("\\", "/")
         self.audio_dir = os.path.join(self.config_dir, "Audio").replace("\\", "/")
+        self.lp_db_path = os.path.join(self.config_dir, "lightplan.db").replace("\\", "/")
 
         os.makedirs(self.default_lightplan_dir, exist_ok=True)
         if(not os.path.isdir(self.default_lightplan_dir)):
@@ -127,6 +129,7 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         self.connected_label.setHidden(True)
         
         style = self.style()
+        self.search_icon = style.standardIcon(QStyle.SP_FileDialogContentsView)
         self.check_icon = style.standardIcon(QStyle.SP_DialogApplyButton)
         self.x_icon = style.standardIcon(QStyle.SP_DialogCloseButton)
         self.dir_icon = style.standardIcon(QStyle.SP_DirIcon)
@@ -136,6 +139,7 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         self.stop_icon = QIcon.fromTheme("media-playback-stop.png", style.standardIcon(QStyle.SP_MediaStop))
         self.play_button.setIcon(self.play_icon)
         self.stop_button.setIcon(self.stop_icon)
+        self.ssl_lookup_button.setIcon(self.search_icon)
         self.song_loaded_status_icon.setPixmap(self.x_icon.pixmap(self.song_loaded_status_icon.width(), self.song_loaded_status_icon.height()))
         self.current_time_lcd.display("00:00.000")
         self.green_button_css = 'QPushButton {background-color: #A3C1DA; color: green;}'
@@ -235,6 +239,7 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         self.statusbar.messageChanged.connect(self.status_msg_changed)
 
         # Button Signals
+        self.ssl_lookup_button.clicked.connect(self.show_ssl_match_dialog)
         self.debug_hidelog_button.clicked.connect(self.click_hidelog_button)
         self.load_song_button.clicked.connect(self.load_youtube)
         self.insert_event_button.pressed.connect(self.insert_event)
@@ -284,6 +289,12 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         self.current_lightplan["lightplan"] = self.lightplan_gui_to_dict()
         self.current_lightplan["md5"] = hashlib.md5(str(self.current_lightplan["lightplan"]).encode("utf-8")).hexdigest()
 
+        #Create Connection to LightPlan SQLite DB
+        self.db_connection = sqlite3.connect(self.lp_db_path)
+        if self.db_connection:
+            self.log("Connected to LightPlan Database", LogLevel.DEBUG)
+            self.init_db()
+
         # Initialize Window Geometry
         geometry = self.settings.value("LightPlanStudio/geometry")
         window_state = self.settings.value("LightPlanStudio/windowState")
@@ -291,6 +302,58 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
             self.restoreGeometry(geometry) 
             self.restoreState(window_state)
         self.refresh_ssl_layout()
+
+    #Initialize the DB if its empty (on first run)
+    def init_db(self):
+        cursor = self.db_connection.cursor()
+        lp_table = cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='lightplans';").fetchall()
+        folder_table = cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='folders';").fetchall()
+        event_table = cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='events';").fetchall()
+        if len(lp_table) == 0  or len(folder_table) == 0 or len(event_table) == 0:
+            sql = """CREATE TABLE IF NOT EXISTS folders (
+                folder_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                parent_id INTEGER DEFAULT NULL,
+                name TEXT
+            );
+            """
+            try:
+                cursor.execute(sql)
+            except Exception as e:
+                self.log(str(e), LogLevel.ERROR)
+            sql = """CREATE TABLE IF NOT EXISTS lightplans (
+                lightplan_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                folder_id INTEGER,
+                song_title TEXT,
+                song_artist TEXT,
+                author TEXT,
+                ssl_id TEXT,
+                spotify_id TEXT,
+                video_url TEXT,
+                notes TEXT,
+                starting_ms INTEGER
+            );
+            """
+            try:
+                cursor.execute(sql)
+            except Exception as e:
+                self.log(str(e), LogLevel.ERROR)
+            sql = """CREATE TABLE IF NOT EXISTS events (
+                event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                lightplan_id INTEGER,
+                offset INTEGER,
+                command TEXT,
+                ignore_delay TEXT,
+                FOREIGN KEY (lightplan_id) 
+                    REFERENCES lightplans (lightplan_id) 
+                        ON DELETE CASCADE 
+                        ON UPDATE NO ACTION
+            );
+            """
+            try:
+                cursor.execute(sql)
+            except Exception as e:
+                self.log(str(e), LogLevel.ERROR)
+            cursor.execute("INSERT INTO folders (name, parent_id) VALUES ('LiveLearn', 0)")
 
     ### Menu Signals #####
     def menu_click(self):
@@ -1119,6 +1182,22 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         self.log(r.text, LogLevel.ERROR)
         return None
 
+    def show_ssl_match_dialog(self):
+        search = self.lp_artist_edit.text() + " " + self.lp_songtitle_edit.text()
+        user = self.settings.value("Twitch/Channel", "").strip()
+        ssl_id = 0
+        if not self.streamer_song_list.sslId_from_user(user):
+            self.log(f"Could not map user [{user}] to ssl id", LogLevel.ERROR)
+            QMessageBox.warning(self, "LightPlan Studio", f"Could not match Twitch User ({user}) to SSL ID")
+            return
+        dlg = SSLMatchDialog(self, self.threadpool, self.streamer_song_list.ssl_id, user, search)
+        dlg.signals.log.connect(self.log)
+        result = dlg.exec()
+        if(result == QDialog.Accepted):
+            if dlg.selection:
+                self.log(f"Match SSL ID {dlg.selection}", LogLevel.INFO)
+                self.lp_sslid_edit.setText(str(dlg.selection))
+
     #Menu > Settings
     def show_settings_dialog(self):
         dlg = SettingsDialog(self.default_lightplan_dir, self)
@@ -1215,6 +1294,121 @@ class LoadingDialog(QDialog):
         self.movie = movie
         self.ui.loading_label.setMovie(movie)
         self.movie.start()
+
+class SSLMatchDialog(QDialog):
+    
+    class RowObj(QTableWidgetItem):
+        def __init__(self, text, song=None):
+            super(SSLMatchDialog.RowObj, self).__init__(text)
+            self.song = song
+
+    class Runner(QRunnable):
+        class Signals(QObject):
+            done = Signal(list)
+            log = Signal(str, LogLevel)
+
+        def __init__(self, ssl_id):
+            super(SSLMatchDialog.Runner, self).__init__()
+            self.signals = self.Signals()
+            self.ssl_id = ssl_id
+
+        def get_all_songs(self, ssl_id):
+            url = f"https://api.streamersonglist.com/v1/streamers/{ssl_id}/songs?size=ALL&current=1&showInactive=false&isNew=false&order=asc"
+            r = requests.get(url)
+            self.log(f"Fetching SSL Songs {url}", LogLevel.DEBUG)
+            if(r.status_code==200):
+                return r.json()["items"]
+            self.log(f"Error Retrieving SSL Songs: HTTP Code {r.status_code}", LogLevel.ERROR)
+            return None
+
+        def run(self):
+            songs = self.get_all_songs(self.ssl_id)
+            self.signals.done.emit(songs)
+
+        def log(self, msg, level = LogLevel.INFO):
+            self.signals.log.emit(msg, level)
+
+    class Signals(QObject):
+        log = Signal(str, LogLevel)
+
+    def __init__(self, parent, threadpool, ssl_id, ssl_user, search_text):
+        super().__init__(parent)
+        self.signals = self.Signals()
+        self.songs = []
+        self.selection = None
+        self.ssl_user = ssl_user
+        self.ssl_id = ssl_id
+        self.search_text = search_text
+        self.ui = UI.Ui_SSLMatchDialog()
+        self.ui.setupUi(self)
+        self.ui.song_table.setHorizontalHeaderLabels(["Artist", "Title"])
+        self.ui.song_table.setEnabled(False)
+        self.ui.search_edit.setEnabled(False)
+        self.ui.label.setEnabled(False)
+        self.ui.save_button.clicked.connect(self.save_clicked)
+        self.ui.cancel_button.clicked.connect(self.cancel_clicked)
+        self.ui.status_label.setText(f"Fetching all songs for user {ssl_user}")
+        self.ui.search_edit.setText(search_text)
+        self.ui.search_edit.textChanged.connect(self.update_table)
+        runner = SSLMatchDialog.Runner(ssl_id)
+        runner.signals.done.connect(self.songs_done)
+        runner.signals.log.connect(self.log)
+        threadpool.start(runner)
+
+    def songs_done(self, songs):
+        if not songs:
+            self.ui.status_label.setText(f"Error fetching songs for SSL User {self.ssl_user}")
+            return
+        n = len(songs)
+        self.songs = songs
+        self.ui.status_label.setText(f"Fetched {n} songs for user {self.ssl_user}")
+        self.log(f"Fetched {n} songs for SSL User {self.ssl_user}", LogLevel.INFO)
+        self.ui.song_table.setEnabled(True)
+        self.ui.search_edit.setEnabled(True)
+        self.ui.label.setEnabled(True)
+        self.ui.progress.setVisible(False)
+        self.update_table()
+
+    def update_table(self):
+        search_text = self.ui.search_edit.text()
+        filtered = self.filter_songs(self.songs, search_text)
+        self.ui.song_table.clearContents()
+        self.ui.song_table.setRowCount(0)
+        for song in filtered:
+            row = self.ui.song_table.rowCount()
+            self.ui.song_table.insertRow(row)
+            artist_item = SSLMatchDialog.RowObj(song["artist"], song)
+            title_item = SSLMatchDialog.RowObj(song["title"], song)
+            self.ui.song_table.setItem(row, 0, artist_item)
+            self.ui.song_table.setItem(row, 1, title_item)
+
+    def filter_songs(self, songs, filter):
+        if not filter:
+            return songs
+        filtered = []
+        filters = filter.split()
+        for song in songs:
+            target = song["artist"] + " " + song["title"]
+            include = True
+            for word in filters:
+                if word not in target:
+                    include = False
+                    break
+            if include:
+                filtered.append(song)
+        return filtered
+
+    def cancel_clicked(self):
+        self.reject()
+
+    def save_clicked(self):
+        sel = self.ui.song_table.selectedItems()
+        if sel and len(sel) > 0:
+            self.selection = sel[0].song["id"]
+        self.accept()
+
+    def log(self, msg, log_level=LogLevel.DEBUG):
+        self.signals.log.emit(msg, log_level)
 
 class CalcDelayDialog(QDialog):
     
