@@ -10,7 +10,8 @@ from pytube import YouTube
 from pathlib import Path
 from enum import Enum
 import hashlib
-import sqlite3
+import unicodedata
+import re
 
 # PySide6 Imports
 from PySide6.QtWidgets import (QApplication, QMainWindow, QStyle, 
@@ -137,10 +138,12 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         self.play_icon = QIcon.fromTheme("media-playback-start.png", style.standardIcon(QStyle.SP_MediaPlay))
         self.pause_icon = QIcon.fromTheme("media-playback-pause.png", style.standardIcon(QStyle.SP_MediaPause))
         self.stop_icon = QIcon.fromTheme("media-playback-stop.png", style.standardIcon(QStyle.SP_MediaStop))
+        self.volume_icon = style.standardIcon(QStyle.SP_MediaVolume)
         self.play_button.setIcon(self.play_icon)
         self.stop_button.setIcon(self.stop_icon)
         self.ssl_lookup_button.setIcon(self.search_icon)
         self.song_loaded_status_icon.setPixmap(self.x_icon.pixmap(self.song_loaded_status_icon.width(), self.song_loaded_status_icon.height()))
+        self.vol_label.setPixmap(self.volume_icon.pixmap(self.vol_label.width(), self.vol_label.height()))
         self.current_time_lcd.display("00:00.000")
         self.green_button_css = 'QPushButton {background-color: #A3C1DA; color: green;}'
         self.red_button_css = 'QPushButton {background-color: #A3C1DA; color: red;}'
@@ -215,6 +218,7 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
             else:
                 self.log("Could not update commands")
         self.custom_cmds = self.settings.value("LightPlanStudio/UpdateCmdsOnStart", False)
+
         ## Event Table ##
         self.lp_table_model = LightPlanTableModel(self.event_table_view, [], self.get_commands())
         self.lp_table_model.action_set_start_event.triggered.connect(self.click_set_start_event)
@@ -227,6 +231,8 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         self.action_new_lp.triggered.connect(self.menu_click)
         self.action_open_lp.triggered.connect(self.menu_click)
         self.action_save_lp.triggered.connect(self.menu_click)
+        self.action_import_lp.triggered.connect(self.menu_click)
+        self.action_export_lp.triggered.connect(self.menu_click)
         self.action_open_lpdir.triggered.connect(self.menu_click)
         self.action_open_configdir.triggered.connect(self.menu_click)
         self.action_exit.triggered.connect(self.menu_click)
@@ -256,7 +262,12 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         self.delay_adjust_slider.sliderReleased.connect(self.delay_slider_released)
         self.lp_save_button.clicked.connect(self.click_save_button)
         self.control_startlp_button.clicked.connect(self.click_start_lightplan)
+        self.volume_slider.valueChanged.connect(self.volume_changed)
+        self.volume_slider.sliderReleased.connect(self.volume_change_event)
+        self.volume_changed()
+
         
+
         ## ThreadPool
         self.threadpool = QThreadPool()
         
@@ -290,10 +301,10 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         self.current_lightplan["md5"] = hashlib.md5(str(self.current_lightplan["lightplan"]).encode("utf-8")).hexdigest()
 
         #Create Connection to LightPlan SQLite DB
-        self.db_connection = sqlite3.connect(self.lp_db_path)
-        if self.db_connection:
-            self.log("Connected to LightPlan Database", LogLevel.DEBUG)
-            self.init_db()
+        self.lightplan_db = LightPlanDB(self.lp_db_path)
+        self.lightplan_db.signals.log.connect(self.log)
+        lps = self.lightplan_db.fetch_all_lightplans()
+        print(lps)
 
         # Initialize Window Geometry
         geometry = self.settings.value("LightPlanStudio/geometry")
@@ -302,58 +313,6 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
             self.restoreGeometry(geometry) 
             self.restoreState(window_state)
         self.refresh_ssl_layout()
-
-    #Initialize the DB if its empty (on first run)
-    def init_db(self):
-        cursor = self.db_connection.cursor()
-        lp_table = cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='lightplans';").fetchall()
-        folder_table = cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='folders';").fetchall()
-        event_table = cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='events';").fetchall()
-        if len(lp_table) == 0  or len(folder_table) == 0 or len(event_table) == 0:
-            sql = """CREATE TABLE IF NOT EXISTS folders (
-                folder_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                parent_id INTEGER DEFAULT NULL,
-                name TEXT
-            );
-            """
-            try:
-                cursor.execute(sql)
-            except Exception as e:
-                self.log(str(e), LogLevel.ERROR)
-            sql = """CREATE TABLE IF NOT EXISTS lightplans (
-                lightplan_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                folder_id INTEGER,
-                song_title TEXT,
-                song_artist TEXT,
-                author TEXT,
-                ssl_id TEXT,
-                spotify_id TEXT,
-                video_url TEXT,
-                notes TEXT,
-                starting_ms INTEGER
-            );
-            """
-            try:
-                cursor.execute(sql)
-            except Exception as e:
-                self.log(str(e), LogLevel.ERROR)
-            sql = """CREATE TABLE IF NOT EXISTS events (
-                event_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                lightplan_id INTEGER,
-                offset INTEGER,
-                command TEXT,
-                ignore_delay TEXT,
-                FOREIGN KEY (lightplan_id) 
-                    REFERENCES lightplans (lightplan_id) 
-                        ON DELETE CASCADE 
-                        ON UPDATE NO ACTION
-            );
-            """
-            try:
-                cursor.execute(sql)
-            except Exception as e:
-                self.log(str(e), LogLevel.ERROR)
-            cursor.execute("INSERT INTO folders (name, parent_id) VALUES ('LiveLearn', 0)")
 
     ### Menu Signals #####
     def menu_click(self):
@@ -364,6 +323,13 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
             self.show_file_dialog()
         elif(sender == self.action_save_lp):
             self.click_save_button()
+        elif(sender == self.action_import_lp):
+            self.log("Ohhh a new feature is coming!", LogLevel.INFO)
+            self.log("Import LightPlan - not implemented yet", LogLevel.DEBUG)
+            self.import_lightplans()
+        elif(sender == self.action_export_lp):
+            self.log("Ohhh a new feature is coming!", LogLevel.INFO)
+            self.log("Export LightPlan - not implemented yet", LogLevel.DEBUG)
         elif(sender == self.action_open_lpdir):
             os.startfile(self.lightplan_dir)
         elif(sender == self.action_open_configdir):
@@ -430,7 +396,6 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         
 
     ## SSL Integration Slots
-
     def refresh_ssl_layout(self, ssl_queue=[]):
         for button in self.ssl_queue_buttons:
             self.ssl_layout.removeWidget(button)
@@ -691,6 +656,17 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
             self.loading_dialog.hide()
     
     ## LightPlan File Functions ##
+    def import_lightplans(self):
+        self.log("Import LP", LogLevel.DEBUG)
+        file_name = QFileDialog.getOpenFileNames(self, "Import LightPlans", self.lightplan_dir, "LightPlans (*.plan)")
+        if(file_name):
+            for f in file_name[0]:
+                self.log(f"Importing LightPlan {f}", LogLevel.DEBUG)
+                with open(f) as plan:
+                    lp = json.load(plan)
+                    self.lightplan_db.import_lightplan(lp)
+                    break
+                    
 
     def check_save_lightplan(self):
         if(self.checkLightPlanUpdated()):
@@ -1077,7 +1053,7 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
             self.key_listener.signals.key_event.connect(self.insert_event)
             self.key_listener.signals.log.connect(self.log)
             self.threadpool.start(self.key_listener)
-            self.insert_event_button.setText("Insert Event\n(Space Bar)")
+            self.insert_event_button.setText("Insert Event (Space Bar)")
             self.play_button.setIcon(self.pause_icon)
         else:
             if(self.key_listener):
@@ -1105,7 +1081,16 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         self.song_slider.setValue(0)
         if(self.audio_player.playbackState() != QMediaPlayer.StoppedState):
             self.audio_player.stop()
-            
+
+    def volume_changed(self):
+        self.volume = self.volume_slider.value()
+        self.audio_output.setVolume(self.volume/100.00)
+
+    def volume_change_event(self):
+        self.volume = self.volume_slider.value()
+        self.log(f"Volume Set {self.volume}%", LogLevel.INFO)
+        self.set_status(f"Volume Set {self.volume}%", 2000)
+
     ## End Event Wizard Functions ##
     
     def click_set_start_event(self):
@@ -1149,7 +1134,6 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
             self.custom_cmds = []
         all_commands = self.custom_cmds + self.defaultCommands
         return all_commands
-
 
     def click_hidelog_button(self):
         self.setFixedSize(self.defaultWidth, self.height)
@@ -1386,9 +1370,11 @@ class SSLMatchDialog(QDialog):
         if not filter:
             return songs
         filtered = []
-        filters = filter.split()
+        filters = filter.lower().split()
         for song in songs:
             target = song["artist"] + " " + song["title"]
+            target = unicodedata.normalize("NFC", target)
+            target = re.sub("[^A-Za-z0-9! ]*", "", target).lower()
             include = True
             for word in filters:
                 if word not in target:

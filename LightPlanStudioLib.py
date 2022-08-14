@@ -2,6 +2,7 @@
 import time
 import keyboard
 import requests
+import sqlite3
 from enum import Enum
 
 #PySide6 Imports
@@ -27,6 +28,170 @@ class LogLevel(Enum):
             if(value == level.value):
                 return level
         return LogLevel.INFO
+
+
+class LightPlanDB():
+
+    class Signals(QObject):
+        log = Signal(str, LogLevel)
+
+    def __init__(self, path):
+        self.path = path
+        self.signals = self.Signals()
+        self.connection = sqlite3.connect(self.path)
+        if self.connection:
+            self.log("Connected to LightPlan Database", LogLevel.INFO)
+        else:
+            self.log("Error connecting to the LightPlan Database", LogLevel.ERROR)
+        self.init_db()
+
+    def init_db(self):
+        #Initialize the DB if its empty (on first run)
+        cursor = self.connection.cursor()
+        lp_table = cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='lightplans';").fetchall()
+        folder_table = cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='folders';").fetchall()
+        event_table = cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='events';").fetchall()
+        if len(lp_table) == 0  or len(folder_table) == 0 or len(event_table) == 0:
+            sql = """CREATE TABLE IF NOT EXISTS folders (
+                folder_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                parent_id INTEGER DEFAULT 0,
+                name TEXT
+            );
+            """
+            try:
+                cursor.execute(sql)
+            except Exception as e:
+                self.log(str(e), LogLevel.ERROR)
+            sql = """CREATE TABLE IF NOT EXISTS lightplans (
+                lightplan_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                folder_id INTEGER,
+                title TEXT,
+                artist TEXT,
+                author TEXT,
+                ssl_id INTEGER,
+                spotify_id INTEGER,
+                video_url TEXT,
+                notes TEXT,
+                starting_ms INTEGER
+            );
+            """
+            try:
+                cursor.execute(sql)
+            except Exception as e:
+                self.log(str(e), LogLevel.ERROR)
+            sql = """CREATE TABLE IF NOT EXISTS events (
+                event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                lightplan_id INTEGER,
+                offset INTEGER,
+                command TEXT,
+                comment TEXT,
+                ignore_delay INTEGER,
+                FOREIGN KEY (lightplan_id) 
+                    REFERENCES lightplans (lightplan_id) 
+                        ON DELETE CASCADE 
+                        ON UPDATE NO ACTION
+            );
+            """
+            try:
+                cursor.execute(sql)
+            except Exception as e:
+                self.log(str(e), LogLevel.ERROR)
+            cursor.execute("INSERT INTO folders (name) VALUES ('LiveLearn')")
+
+    def fetch_all_lightplans(self):
+        lps = []
+        cursor = self.connection.cursor()
+
+        sql = "SELECT * FROM lightplans;"
+        try:
+            lps_rows = cursor.execute(sql).fetchall()
+        except Exception as e:
+            self.log(str(e), LogLevel.ERROR)
+            return None
+        for lp in lps_rows:
+            lightplan_dict = {
+                "song_title": lp[2],
+                "song_artist": lp[3],
+                "author": lp[4],
+                "ssl_id": lp[5],
+                "spotify_id": lp[6],
+                "video_url": lp[7],
+                "notes": lp[8],
+                "starting_ms": lp[9],
+                "events": []
+            }
+            sql = f"SELECT * FROM events WHERE lightplan_id = {lp[0]};"
+            rows = cursor.execute(sql).fetchall()
+            for row in rows:
+                ignore_delay = False
+                if row[5]:
+                    ignore_delay = True
+                event_dict = {
+                    "offset": row[2],
+                    "command": row[3],
+                    "comment": row[4],
+                    "ignore_delay": ignore_delay
+                }
+                lightplan_dict["events"].append(event_dict)
+            lps.append(lightplan_dict)                
+        return lps
+
+    def import_lightplan(self, lp_dict):
+        self.log(f"Importing LightPlan {lp_dict['song_artist']} - {lp_dict['song_title']}", LogLevel.INFO)
+        cursor = self.connection.cursor()
+        sql = f"SELECT count(lightplan_id) FROM lightplans WHERE artist = '{lp_dict['song_artist']}' AND title = '{lp_dict['song_title']}';"
+        result = cursor.execute(sql).fetchone()
+        if result and result[0] > 0:
+            self.log(str(result), LogLevel.DEBUG)
+            self.log("This lightplan already exists!", LogLevel.INFO)
+            return
+        
+        try:
+            lp_dict["ssl_id"] = int(lp_dict["ssl_id"])
+        except ValueError:
+            lp_dict["ssl_id"] = "NULL"
+        
+        try:
+            lp_dict["spotify_id"] = int(lp_dict["spotify_id"])
+        except ValueError:
+            lp_dict["spotify_id"] = "NULL"
+
+        try:
+            lp_dict["starting_ms"] = int(lp_dict["starting_ms"])
+        except ValueError:
+            lp_dict["starting_ms"] = "NULL"
+
+        sql = f"""INSERT INTO lightplans (title, artist, author, ssl_id, spotify_id, video_url,  notes, starting_ms) 
+            VALUES (
+                '{lp_dict['song_title']}',
+                '{lp_dict['song_artist']}',
+                '{lp_dict['author']}',
+                {lp_dict['ssl_id']},
+                {lp_dict['spotify_id']},
+                '{lp_dict['youtube_url']}',
+                '{lp_dict['notes']}',
+                {lp_dict['starting_ms']}
+            );
+        """
+        try:
+            result = cursor.execute(sql)
+            self.connection.commit()
+            lp_id = cursor.execute(f"SELECT lightplan_id FROM lightplans WHERE rowid = {cursor.lastrowid};").fetchone()[0]
+            rows_to_insert = []
+            sql = "INSERT INTO events (lightplan_id, offset, command, comment, ignore_delay) VALUES (?,?,?,?,?);"
+            for event in lp_dict["events"]:
+                ignore_delay = 0
+                if event["ignore_delay"]:
+                    ignore_delay = 1
+                rows_to_insert.append((lp_id,event["offset"],event["command"],event["comment"],ignore_delay))
+            cursor.executemany(sql, rows_to_insert)
+            self.connection.commit()
+        except Exception as e:
+            self.log("Could not import LightPlan")
+            self.log(str(e), LogLevel.ERROR)
+
+    def log(self, msg, level=LogLevel.DEBUG):
+        self.signals.log.emit(msg, level)
 
 
 class SSLButton(QPushButton):
