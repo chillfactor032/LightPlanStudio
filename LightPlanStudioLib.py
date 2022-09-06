@@ -3,7 +3,7 @@ import time
 import keyboard
 import requests
 import sqlite3
-from enum import Enum
+from enum import Enum, auto
 
 #PySide6 Imports
 from PySide6.QtCore import QRunnable, Signal, Slot, QObject, Qt, QAbstractTableModel, QEvent
@@ -29,6 +29,11 @@ class LogLevel(Enum):
                 return level
         return LogLevel.INFO
 
+class OperatingSystem(Enum):
+    WINDOWS = auto()
+    MAC = auto()
+    LINUX = auto()
+    UNKNOWN = auto()
 
 class LightPlanDB():
 

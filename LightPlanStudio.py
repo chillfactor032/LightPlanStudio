@@ -4,14 +4,16 @@ import sys
 import datetime
 import json
 import time
-from urllib.parse import ParseResultBytes
 import requests
+from urllib.parse import ParseResultBytes
 from pytube import YouTube
 from pathlib import Path
-from enum import Enum
+from enum import Enum, auto
 import hashlib
 import unicodedata
 import re
+import platform
+import subprocess
 
 # PySide6 Imports
 from PySide6.QtWidgets import (QApplication, QMainWindow, QStyle, 
@@ -34,6 +36,18 @@ from LightPlanStudioLib import *
 class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
     def __init__(self, app_name, version):
         super(LightPlanStudio, self).__init__()
+
+        #Attempt to identify OS
+        self.platform = OperatingSystem.UNKNOWN
+
+        platform_str = platform.platform().lower()
+
+        if "windows" in platform_str:
+            self.platform = OperatingSystem.WINDOWS
+        elif "macos" in platform_str:
+            self.platform = OperatingSystem.MAC
+        else:
+            self.platform = OperatingSystem.UNKNOWN
 
         #Read Version File From Resources
         version_file = QFile(":version.json")
@@ -113,6 +127,7 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         self.expandedWidth = 1250
         
         self.log(f"Config File:{self.ini_path}", LogLevel.DEBUG)
+        self.log(f"{self.platform}", LogLevel.DEBUG)
 
         ## Setup UI
         self.loading_pixmap = QPixmap(":resources/img/loading.gif")
@@ -331,9 +346,9 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
             self.log("Ohhh a new feature is coming!", LogLevel.INFO)
             self.log("Export LightPlan - not implemented yet", LogLevel.DEBUG)
         elif(sender == self.action_open_lpdir):
-            os.startfile(self.lightplan_dir)
+            self.show_directory(self.lightplan_dir)
         elif(sender == self.action_open_configdir):
-            os.startfile(self.config_dir)
+            self.show_directory(self.config_dir)
         elif(sender == self.action_exit):
             self.close()
         elif(sender == self.action_settings):
@@ -1223,6 +1238,12 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
             self.delay_lcd.display(str(round(self.stream_delay_ms/1000, 1)))
             self.log(f"Stream Delay: {self.stream_delay_ms}ms")
 
+    def show_directory(self, path):
+        if self.platform == OperatingSystem.WINDOWS:
+            os.startfile(path)
+        elif self.platform == OperatingSystem.MAC:
+            subprocess.call(["open", path])
+            
     def closeEvent(self, evt):
         self.check_save_lightplan()
         if(self.key_listener):
