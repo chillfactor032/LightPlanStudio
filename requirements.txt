@@ -3,5 +3,7 @@ requests
 pytube
 keyboard
 irc
+twitchio
+python-socketio
 pyinstaller; sys_platform == 'darwin'
 nuitka; sys_platform == 'win32'
