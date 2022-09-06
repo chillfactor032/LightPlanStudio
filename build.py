@@ -98,8 +98,8 @@ else:
 print("=============================================\n")
 
 # Create dist directory if it doesnt exist
-if(not os.path.isdir(dist_dir)):
-    os.makedirs(dist_dir, exist_ok=True)
+#if(not os.path.isdir(dist_dir)):
+#    os.makedirs(dist_dir, exist_ok=True)
 
 # Function to find all files in dir_path 
 # with extension (not recursive)
@@ -166,7 +166,7 @@ for file in ui_files:
 print("\n> UI Files Compiled Successfully")
 print("=============================================\n")
 
-resource_dest = "Resources.py"
+resource_dest = os.path.join(script_dir, "Resources.py")
 print("Compiling Resources")
 print(f"> Target Resources file: {resource_dest}")
 
@@ -196,7 +196,7 @@ if(target_env == OperatingSystem.WINDOWS):
             f" -o dist/{OUTPUT_FILE} " \
             f"{input_file_path}"
 else:
-    cmd = f"pyinstaller -y --onefile --windowed --name='{OUTPUT_FILE}' --icon='{script_dir}/resources/img/icon_128.icns' {input_file_path}"
+    cmd = f"pyinstaller --onefile --windowed --name='{OUTPUT_FILE}' --icon='{script_dir}/resources/img/icon_128.icns' {input_file_path}"
     
 proc = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 for c in iter(lambda: proc.stdout.read(1), b''):
