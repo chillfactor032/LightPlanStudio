@@ -16,12 +16,12 @@ INPUT_FILE = "LightPlanStudio.py"
 PROJECT_NAME = "LightPlanStudio"
 OUTPUT_FILE = PROJECT_NAME
 
-platform_str = platform.platform()
+platform_str = platform.platform().lower()
 
-if "Windows" in platform_str:
+if "windows" in platform_str:
     target_env = OperatingSystem.WINDOWS
     OUTPUT_FILE += ".exe"
-elif "MacOS" in platform_str:
+elif "macos" in platform_str:
     target_env = OperatingSystem.MAC
 else:
     target_env = OperatingSystem.LINUX
