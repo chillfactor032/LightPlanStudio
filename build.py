@@ -28,6 +28,7 @@ else:
 
 # Specify Paths and Files
 script_dir = os.path.dirname(os.path.realpath(__file__))
+input_file_path = os.path.join(script_dir, INPUT_FILE)
 ui_path = os.path.join(script_dir, "resources", "ui")
 destination_file = os.path.join(script_dir, "UI_Components.py")
 resource_file = os.path.join(script_dir, f"{PROJECT_NAME}.rc")
@@ -193,9 +194,9 @@ if(target_env == OperatingSystem.WINDOWS):
             f"--enable-plugin=pyside6,numpy --windows-icon-from-ico={version['ico']} " \
             f"{show_cmd}" \
             f" -o dist/{OUTPUT_FILE} " \
-            f"{INPUT_FILE}"
+            f"{input_file_path}"
 else:
-    cmd = f"pyinstaller --onefile --windowed --name='{OUTPUT_FILE}' --icon='resources/img/icons.icns' {INPUT_FILE}"
+    cmd = f"pyinstaller --onefile --windowed --name='{OUTPUT_FILE}' --icon='resources/img/icons.icns' {input_file_path}"
     
 proc = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 for c in iter(lambda: proc.stdout.read(1), b''):
