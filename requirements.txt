@@ -2,5 +2,6 @@ PySide6
 requests
 pytube
 keyboard
+irc
 pyinstaller; sys_platform == 'darwin'
 nuitka; sys_platform == 'win32'
