@@ -1,0 +1,6 @@
+PySide6
+requests
+pytube
+keyboard
+pyinstaller; sys_platform == 'darwin'
+nuitka; sys_platform == 'win32'

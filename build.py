@@ -56,6 +56,7 @@ print("=============================================\n")
 print("Checking paths for required executables...")
 
 python_dir = os.path.dirname(sys.executable)
+print(f"> Python Dir: {python_dir}")
 compiler_path = ""
 compiler_name = ""
 rcc_exe_name = "pyside6-rcc"
