@@ -196,7 +196,7 @@ if(target_env == OperatingSystem.WINDOWS):
             f" -o dist/{OUTPUT_FILE} " \
             f"{input_file_path}"
 else:
-    cmd = f"pyinstaller --onefile --windowed --name='{OUTPUT_FILE}' --icon='resources/img/icons.icns' {input_file_path}"
+    cmd = f"pyinstaller --onefile --windowed --name='{OUTPUT_FILE}' --icon='resources/img/icon.icns' {input_file_path}"
     
 proc = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 for c in iter(lambda: proc.stdout.read(1), b''):
