@@ -3,12 +3,13 @@ import time
 import keyboard
 import requests
 import sqlite3
-from enum import Enum
+import json
+from enum import Enum, auto
 
 #PySide6 Imports
 from PySide6.QtCore import QRunnable, Signal, Slot, QObject, Qt, QAbstractTableModel, QEvent
-from PySide6.QtWidgets import QLineEdit, QCheckBox, QComboBox, QMenu, QStyledItemDelegate, QStyle, QPushButton
-from PySide6.QtGui import QAction, QCursor, QStandardItemModel
+from PySide6.QtWidgets import QLineEdit, QCheckBox, QComboBox, QMenu, QStyledItemDelegate, QStyle, QPushButton, QTreeWidgetItem
+from PySide6.QtGui import QAction, QCursor, QStandardItemModel, QStandardItem
 
 #LightPlan Imports
 import irc.client
@@ -29,13 +30,26 @@ class LogLevel(Enum):
                 return level
         return LogLevel.INFO
 
+class FolderTreeWidgetItem(QTreeWidgetItem):
+    def __init__(self, name, folder_data):
+        super(FolderTreeWidgetItem, self).__init__(name)
+        self.folder_data = folder_data
+
+class TreeItemType(Enum):
+    FOLDER = "Folder"
+    ARTIST = "Artist"
+    LIGHTPLAN = "LightPlan"
+
+    def __str__(self):
+        return str(self.value)
 
 class LightPlanDB():
 
     class Signals(QObject):
         log = Signal(str, LogLevel)
 
-    def __init__(self, path):
+    def __init__(self, version, path):
+        self.version = version
         self.path = path
         self.signals = self.Signals()
         self.connection = sqlite3.connect(self.path)
@@ -48,10 +62,21 @@ class LightPlanDB():
     def init_db(self):
         #Initialize the DB if its empty (on first run)
         cursor = self.connection.cursor()
+        lp_data = cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='lps_data';").fetchall()
         lp_table = cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='lightplans';").fetchall()
         folder_table = cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='folders';").fetchall()
         event_table = cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='events';").fetchall()
         if len(lp_table) == 0  or len(folder_table) == 0 or len(event_table) == 0:
+            self.log(f"Initializing database for first use.")
+            sql = """CREATE TABLE IF NOT EXISTS lps_data (
+                name TEXT,
+                data TEXT
+            );
+            """
+            try:
+                cursor.execute(sql)
+            except Exception as e:
+                self.log(str(e), LogLevel.ERROR)
             sql = """CREATE TABLE IF NOT EXISTS folders (
                 folder_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 parent_id INTEGER DEFAULT 0,
@@ -64,7 +89,7 @@ class LightPlanDB():
                 self.log(str(e), LogLevel.ERROR)
             sql = """CREATE TABLE IF NOT EXISTS lightplans (
                 lightplan_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                folder_id INTEGER,
+                folder_id INTEGER DEFAULT 0,
                 title TEXT,
                 artist TEXT,
                 author TEXT,
@@ -80,16 +105,11 @@ class LightPlanDB():
             except Exception as e:
                 self.log(str(e), LogLevel.ERROR)
             sql = """CREATE TABLE IF NOT EXISTS events (
-                event_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 lightplan_id INTEGER,
                 offset INTEGER,
                 command TEXT,
                 comment TEXT,
-                ignore_delay INTEGER,
-                FOREIGN KEY (lightplan_id) 
-                    REFERENCES lightplans (lightplan_id) 
-                        ON DELETE CASCADE 
-                        ON UPDATE NO ACTION
+                ignore_delay INTEGER
             );
             """
             try:
@@ -97,46 +117,342 @@ class LightPlanDB():
             except Exception as e:
                 self.log(str(e), LogLevel.ERROR)
             cursor.execute("INSERT INTO folders (name) VALUES ('LiveLearn')")
-
-    def fetch_all_lightplans(self):
-        lps = []
+            self.set_data("version", self.version)
+            self.connection.commit()
+    
+    def get_data(self, name):
+        sql = f"SELECT data FROM lps_data WHERE name=?;"
         cursor = self.connection.cursor()
-
-        sql = "SELECT * FROM lightplans;"
         try:
-            lps_rows = cursor.execute(sql).fetchall()
+            row = cursor.execute(sql, [name]).fetchone()
+            self.connection.commit()
+            if row:
+                return row[0]
+            return None
         except Exception as e:
+            self.log(f"Could not fetch data [{name}]", LogLevel.ERROR)
             self.log(str(e), LogLevel.ERROR)
             return None
-        for lp in lps_rows:
-            lightplan_dict = {
-                "song_title": lp[2],
-                "song_artist": lp[3],
-                "author": lp[4],
-                "ssl_id": lp[5],
-                "spotify_id": lp[6],
-                "video_url": lp[7],
-                "notes": lp[8],
-                "starting_ms": lp[9],
-                "events": []
-            }
-            sql = f"SELECT * FROM events WHERE lightplan_id = {lp[0]};"
+
+    def set_data(self, name, data):
+        old_data = self.get_data(name)
+        if old_data == data:
+            return
+        
+        #Data doesnt exist yet
+        if not old_data:
+            sql = f"INSERT INTO lps_data (name, data) VALUES (?, ?);"
+            cursor = self.connection.cursor()
+            try:
+                row = cursor.execute(sql, [name, data])
+                self.connection.commit()
+            except Exception as e:
+                self.log(f"Could not set data [{name}] = [{data}]", LogLevel.ERROR)
+                self.log(str(e), LogLevel.ERROR)
+                return None
+        else:
+            sql = f"UPDATE lps_data SET data=? WHERE name=?;"
+            cursor = self.connection.cursor()
+            try:
+                row = cursor.execute(sql, [data, name])
+                self.connection.commit()
+            except Exception as e:
+                self.log(f"Could not set data [{name}] = [{data}]", LogLevel.ERROR)
+                self.log(str(e), LogLevel.ERROR)
+                return None
+
+    def fetch_all_folders(self):
+        sql = f"SELECT * FROM folders;"
+        cursor = self.connection.cursor()
+        folders = []
+        try:
             rows = cursor.execute(sql).fetchall()
             for row in rows:
-                ignore_delay = False
-                if row[5]:
-                    ignore_delay = True
-                event_dict = {
-                    "offset": row[2],
-                    "command": row[3],
-                    "comment": row[4],
-                    "ignore_delay": ignore_delay
+                folder = {
+                    "folder_id": row[0],
+                    "parent_id": row[1],
+                    "name": row[2]
                 }
-                lightplan_dict["events"].append(event_dict)
-            lps.append(lightplan_dict)                
-        return lps
+                folders.append(folder)
+            self.connection.commit()
+            return folders
+        except Exception as e:
+            self.log(f"Could not fetch all folders", LogLevel.ERROR)
+            self.log(str(e), LogLevel.ERROR)
+            return None
 
-    def import_lightplan(self, lp_dict):
+    def fetch_folder(self, folder_id):
+        sql = f"SELECT * FROM folders WHERE folder_id =?;"
+        cursor = self.connection.cursor()
+        try:
+            row = cursor.execute(sql, [folder_id]).fetchone()
+            folder = {
+                "folder_id": row[0],
+                "parent_id": row[1],
+                "name": row[2]
+            }
+            self.connection.commit()
+            return folder
+        except Exception as e:
+            self.log(f"Could not fetch folder {folder_id}", LogLevel.ERROR)
+            self.log(str(e), LogLevel.ERROR)
+            return None
+
+    def fetch_orphan_folders(self):
+        orphans = []
+        cursor = self.connection.cursor()
+        #Root folders are never orphans
+        sql = """
+        SELECT f.folder_id, f.parent_id, f.name, (
+            CASE WHEN f.parent_id = 0 
+            THEN True 
+            ELSE (
+                CASE WHEN p.folder_id IS NULL
+                THEN False
+                ELSE True
+                END)
+            END) as parent_exists
+        FROM folders f
+        LEFT JOIN folders p
+            ON f.parent_id = p.folder_id
+        """
+        try:
+            rows = cursor.execute(sql).fetchall()
+            for row in rows:
+                if row[3] == 0:
+                    obj = {
+                        "folder_id": row[0],
+                        "parent_id": row[1],
+                        "name": row[2],
+                    }
+                    orphans.append(obj)
+        except Exception as e:
+            self.log(f"Could not find orphaned folders", LogLevel.ERROR)
+            self.log(str(e), LogLevel.ERROR)
+            return None
+        return orphans
+
+    def fetch_orphan_lightplans(self):
+        orphans = []
+        cursor = self.connection.cursor()
+        sql = """
+        SELECT lp.lightplan_id, lp.artist, lp.title, (
+            CASE WHEN lp.folder_id = 0
+            THEN True
+            ELSE (
+                CASE WHEN f.folder_id IS NULL
+                THEN False
+                ELSE True
+                END)
+            END) as parent_exists
+        FROM lightplans lp
+        LEFT JOIN folders f
+            ON lp.folder_id = f.folder_id
+        """
+        try:
+            rows = cursor.execute(sql).fetchall()
+            for row in rows:
+                    if row[3] == 0:
+                        obj = {
+                            "lightplan_id": row[0],
+                            "song_artist": row[1],
+                            "song_title": row[2]
+                        }
+                        orphans.append(obj)
+        except Exception as e:
+            self.log(f"Could not find orphaned lightplans", LogLevel.ERROR)
+            self.log(str(e), LogLevel.ERROR)
+            return None
+        return orphans
+
+    def delete_folder(self, folder_id, recurse=True):
+        cursor = self.connection.cursor()
+        sql = f"DELETE FROM folders WHERE folder_id = ?;"
+        try:
+            result = cursor.execute(sql, [folder_id])
+            self.connection.commit()
+            if recurse == False:
+                return True
+
+            # Cascade delete to orphaned folders
+            orphan_folders = self.fetch_orphan_folders()
+            while len(orphan_folders) > 0:
+                for folder in orphan_folders:
+                    self.log(f"Cascading delete to orphan folder {folder['name']}")
+                    self.delete_folder(folder["folder_id"], False)
+                orphan_folders = self.fetch_orphan_folders()
+
+            # Cascade delete to orphaned Lightplans
+            orphan_lps = self.fetch_orphan_lightplans()
+            for lps in orphan_lps:
+                self.log(f"Cascading delete to orphan lightplan {lps['song_artist']} - {lps['song_title']}")
+                self.delete_lightplan(lps["lightplan_id"])
+            return True
+        except Exception as e:
+            self.log(f"Could not delete folder {folder_id}", LogLevel.ERROR)
+            self.log(str(e), LogLevel.ERROR)
+            return False
+
+    def delete_lightplan(self, lightplan_id):
+        cursor = self.connection.cursor()
+        sql = f"DELETE FROM lightplans WHERE lightplan_id = ?;"
+        try:
+            self.clear_events_from_lightplan(lightplan_id)
+            result = cursor.execute(sql, [lightplan_id])
+            self.connection.commit()
+            return True
+        except Exception as e:
+            self.log(f"Could not delete lightplan {lightplan_id}", LogLevel.ERROR)
+            self.log(str(e), LogLevel.ERROR)
+            return False
+
+    def clear_events_from_lightplan(self, lightplan_id):
+        cursor = self.connection.cursor()
+        sql = f"DELETE FROM events WHERE lightplan_id=?;"
+        try:
+            result = cursor.execute(sql, [lightplan_id])
+            self.connection.commit()
+            return True
+        except Exception as e:
+            self.log(f"Could not remove events for LightPlan {lightplan_id}", LogLevel.ERROR)
+            self.log(str(e), LogLevel.ERROR)
+            return False
+
+    def rename_folder(self, folder_id, new_name):
+        cursor = self.connection.cursor()
+        sql = f"UPDATE folders SET name = ? WHERE folder_id = ?;"
+        try:
+            params = [
+                new_name,
+                folder_id
+            ]
+            result = cursor.execute(sql, params)
+            self.connection.commit()
+            return True
+        except Exception as e:
+            self.log("Could not Rename folder - id: {folder_id}", LogLevel.ERROR)
+            self.log(str(e), LogLevel.ERROR)
+            return False
+
+    def create_folder(self, parent_id, name):
+        cursor = self.connection.cursor()
+        sql = f"INSERT INTO folders (parent_id, name) VALUES (?,?);"
+        try:
+            params = [
+                parent_id,
+                name
+            ]
+            result = cursor.execute(sql, params)
+            self.connection.commit()
+            return True
+        except Exception as e:
+            self.log("Could create folder ({folder_id})", LogLevel.ERROR)
+            self.log(str(e), LogLevel.ERROR)
+            return False
+
+    def move_folder(self, folder_id, new_parent_id):
+        cursor = self.connection.cursor()
+        sql = f"UPDATE folders SET parent_id = ? WHERE folder_id = ?;"
+        try:
+            params = [
+                new_parent_id,
+                folder_id
+            ]
+            result = cursor.execute(sql, params)
+            self.connection.commit()
+            return True
+        except Exception as e:
+            self.log(f"Error setting new parent ({new_parent_id}) for folder ({folder_id})", LogLevel.ERROR)
+            self.log(str(e), LogLevel.ERROR)
+            return False
+
+    def move_lightplan(self, lightplan_id, new_folder_id):
+        cursor = self.connection.cursor()
+        sql = f"UPDATE lightplans SET folder_id = ? WHERE lightplan_id = ?;"
+        try:
+            params = [
+                new_folder_id,
+                lightplan_id
+            ]
+            result = cursor.execute(sql, params)
+            self.connection.commit()
+            return True
+        except Exception as e:
+            self.log(f"Error setting new parent ({new_folder_id}) for lightplan ({lightplan_id})", LogLevel.ERROR)
+            self.log(str(e), LogLevel.ERROR)
+            return False
+
+    def insert_events_for_lightplan(self, lightplan_id, events):
+        num_events = len(events)
+        cursor = self.connection.cursor()
+        try:
+            rows_to_insert = []
+            sql = "INSERT INTO events (lightplan_id, offset, command, comment, ignore_delay) VALUES (?,?,?,?,?);"
+            for event in events:
+                ignore_delay = 0
+                if event["ignore_delay"]:
+                    ignore_delay = 1
+                rows_to_insert.append((lightplan_id,event["offset"],event["command"],event["comment"],ignore_delay))
+            cursor.executemany(sql, rows_to_insert)
+            self.connection.commit()
+            return True
+        except Exception as e:
+            self.log(f"Could not insert {num_events} events for LightPlan {lightplan_id}", LogLevel.ERROR)
+            self.log(str(e), LogLevel.ERROR)
+            return False
+
+    def update_lightplan(self, lp_dict):
+        inserted_id = None
+        self.log(f"Saving LightPlan {lp_dict['song_artist']} - {lp_dict['song_title']}", LogLevel.INFO)
+        try:
+            lp_dict["ssl_id"] = int(lp_dict["ssl_id"])
+        except ValueError:
+            lp_dict["ssl_id"] = "NULL"
+        try:
+            lp_dict["spotify_id"] = int(lp_dict["spotify_id"])
+        except ValueError:
+            lp_dict["spotify_id"] = "NULL"
+        try:
+            lp_dict["starting_ms"] = int(lp_dict["starting_ms"])
+        except ValueError:
+            lp_dict["starting_ms"] = "NULL"
+        cursor = self.connection.cursor()
+        sql = f"""UPDATE lightplans
+            SET
+                title = ?,
+                artist = ?,
+                author = ?,
+                ssl_id = ?,
+                spotify_id = ?,
+                video_url = ?,
+                notes = ?,
+                starting_ms = ?
+            WHERE lightplan_id = ?;
+        """
+        try:
+            params = [
+                lp_dict["song_title"],
+                lp_dict["song_artist"],
+                lp_dict["author"],
+                lp_dict["ssl_id"],
+                lp_dict["spotify_id"],
+                lp_dict["video_url"],
+                lp_dict["notes"],
+                lp_dict["starting_ms"],
+                lp_dict["lightplan_id"]
+            ]
+            result = cursor.execute(sql, params)
+            self.connection.commit()
+            self.clear_events_from_lightplan(lp_dict["lightplan_id"])
+            self.insert_events_for_lightplan(lp_dict["lightplan_id"], lp_dict["events"])
+            return True
+        except Exception as e:
+            self.log("Could not Save/Import LightPlan", LogLevel.ERROR)
+            self.log(str(e), LogLevel.ERROR)
+            return False
+
+    def insert_lightplan(self, lp_dict, folder_id=0):
+        inserted_id = None
         self.log(f"Importing LightPlan {lp_dict['song_artist']} - {lp_dict['song_title']}", LogLevel.INFO)
         cursor = self.connection.cursor()
         sql = f"SELECT count(lightplan_id) FROM lightplans WHERE artist = '{lp_dict['song_artist']}' AND title = '{lp_dict['song_title']}';"
@@ -145,7 +461,6 @@ class LightPlanDB():
             self.log(str(result), LogLevel.DEBUG)
             self.log("This lightplan already exists!", LogLevel.INFO)
             return
-        
         try:
             lp_dict["ssl_id"] = int(lp_dict["ssl_id"])
         except ValueError:
@@ -161,8 +476,9 @@ class LightPlanDB():
         except ValueError:
             lp_dict["starting_ms"] = "NULL"
 
-        sql = f"""INSERT INTO lightplans (title, artist, author, ssl_id, spotify_id, video_url,  notes, starting_ms) 
+        sql = f"""INSERT INTO lightplans (folder_id, title, artist, author, ssl_id, spotify_id, video_url,  notes, starting_ms) 
             VALUES (
+                {folder_id},
                 '{lp_dict['song_title']}',
                 '{lp_dict['song_artist']}',
                 '{lp_dict['author']}',
@@ -176,19 +492,129 @@ class LightPlanDB():
         try:
             result = cursor.execute(sql)
             self.connection.commit()
+            inserted_id = cursor.lastrowid
             lp_id = cursor.execute(f"SELECT lightplan_id FROM lightplans WHERE rowid = {cursor.lastrowid};").fetchone()[0]
-            rows_to_insert = []
-            sql = "INSERT INTO events (lightplan_id, offset, command, comment, ignore_delay) VALUES (?,?,?,?,?);"
-            for event in lp_dict["events"]:
-                ignore_delay = 0
-                if event["ignore_delay"]:
-                    ignore_delay = 1
-                rows_to_insert.append((lp_id,event["offset"],event["command"],event["comment"],ignore_delay))
-            cursor.executemany(sql, rows_to_insert)
-            self.connection.commit()
+            self.insert_events_for_lightplan(lp_id, lp_dict["events"])
+            return inserted_id
         except Exception as e:
             self.log("Could not import LightPlan")
             self.log(str(e), LogLevel.ERROR)
+            return None
+
+    def get_children_folders(self, parent_id):
+        cursor = self.connection.cursor()
+        sql = "SELECT * FROM folders WHERE parent_id=?;"
+        try:
+            rows = cursor.execute(sql, [parent_id]).fetchall()
+        except Exception as e:
+            self.log(f"Error fetching all folders", LogLevel.ERROR)
+            self.log(str(e), LogLevel.ERROR)
+            return None
+        folders = []
+        for row in rows:
+            folder = {
+                "folder_id": row[0],
+                "parent_id": row[1],
+                "name": row[2]
+            }
+            folders.append(folder)
+        return folders
+
+    def fetch_all_folders(self):
+        cursor = self.connection.cursor()
+        sql = "SELECT * FROM folders;"
+        try:
+            rows = cursor.execute(sql).fetchall()
+        except Exception as e:
+            self.log(f"Error fetching all folders", LogLevel.ERROR)
+            self.log(str(e), LogLevel.ERROR)
+            return None
+        folders = []
+        for row in rows:
+            folder = {
+                "folder_id": row[0],
+                "parent_id": row[1],
+                "name": row[2]
+            }
+            folders.append(folder)
+        return folders
+        
+    def fetch_lightplan(self, lightplan_id):
+        cursor = self.connection.cursor()
+        sql = "SELECT * FROM lightplans WHERE lightplan_id=?;"
+        try:
+            row = cursor.execute(sql, [lightplan_id]).fetchone()
+        except Exception as e:
+            self.log(f"Error fetching LightPlan with Id: {lightplan_id}", LogLevel.ERROR)
+            self.log(str(e), LogLevel.ERROR)
+            return None
+        lightplan_dict = {
+            "lightplan_id": row[0],
+            "folder_id": row[1],
+            "song_title": row[2],
+            "song_artist": row[3],
+            "author": row[4],
+            "ssl_id": row[5],
+            "spotify_id": row[6],
+            "video_url": row[7],
+            "notes": row[8],
+            "starting_ms": row[9],
+            "events": []
+        }
+        sql = f"SELECT * FROM events WHERE lightplan_id = ?;"
+        rows = cursor.execute(sql, [lightplan_id]).fetchall()
+        for row in rows:
+            ignore_delay = False
+            if row[4]:
+                ignore_delay = True
+            event_dict = {
+                "offset": row[1],
+                "command": row[2],
+                "comment": row[3],
+                "ignore_delay": ignore_delay
+            }
+            lightplan_dict["events"].append(event_dict)            
+        return lightplan_dict
+
+    def fetch_all_lightplans(self, full_data=False):
+        lps = []
+        cursor = self.connection.cursor()
+        sql = "SELECT * FROM lightplans;"
+        try:
+            lps_rows = cursor.execute(sql).fetchall()
+        except Exception as e:
+            self.log(str(e), LogLevel.ERROR)
+            return None
+        for lp in lps_rows:
+            lightplan_dict = {
+                "lightplan_id": lp[0],
+                "folder_id": lp[1],
+                "song_title": lp[2],
+                "song_artist": lp[3],
+                "author": lp[4],
+                "ssl_id": lp[5],
+                "spotify_id": lp[6],
+                "video_url": lp[7],
+                "notes": lp[8],
+                "starting_ms": lp[9],
+                "events": []
+            }
+            if full_data:
+                sql = f"SELECT * FROM events WHERE lightplan_id = {lp[0]};"
+                rows = cursor.execute(sql).fetchall()
+                for row in rows:
+                    ignore_delay = False
+                    if row[4]:
+                        ignore_delay = True
+                    event_dict = {
+                        "offset": row[1],
+                        "command": row[2],
+                        "comment": row[3],
+                        "ignore_delay": ignore_delay
+                    }
+                    lightplan_dict["events"].append(event_dict)     
+            lps.append(lightplan_dict)                
+        return lps
 
     def log(self, msg, level=LogLevel.DEBUG):
         self.signals.log.emit(msg, level)
@@ -202,6 +628,7 @@ class SSLButton(QPushButton):
     def setData(self, data):
         self.data = data
     
+
 class StreamerSongList(QRunnable):
 
     class Signals(QObject):
@@ -420,6 +847,34 @@ class LightPlanRunner(QRunnable):
         self.signals.log.emit(msg, level)
 
 
+class LightPlanTreeItem(QStandardItem):
+    def __init__(self, name, item_type=TreeItemType.LIGHTPLAN):
+        super(LightPlanTreeItem, self).__init__(name)
+        self.name = name
+        self.parent_id = 0
+        self.id = 0
+        self.artist = ""
+        self.title = ""
+        self.is_lightplan = True
+        self.id = 0
+        self.item_type = item_type
+
+    def setParentId(self, id):
+        self.parent_id = id
+    
+    def setId(self, id):
+        self.id = id
+
+    def setArtist(self, artist):
+        self.artist = artist
+
+    def setTitle(self, title):
+        self.title = title
+
+    def get_type(self):
+        return self.item_type
+
+
 class LightPlanTreeModel(QStandardItemModel):
 
     def __init__(self):
@@ -431,6 +886,10 @@ class LightPlanTreeModel(QStandardItemModel):
     def dropMimeData(data, action, row, column, parent):
         print(f"Drop Event")
         print(data)
+
+    def getItemAt(pos):
+        pass
+
 
 class KeyListener(QRunnable):
 
@@ -553,6 +1012,52 @@ class TwitchIRC(QRunnable):
         self.signals.log.emit(msg, level)
     
 
+class YoutubeVideoInfo(QRunnable):
+
+    class Signals(QObject):
+        done = Signal(dict)
+        log = Signal(str, LogLevel)
+        
+    def __init__(self, api_key, video_id):
+        super(YoutubeVideoInfo, self).__init__()
+        self.api_key = api_key
+        self.video_id = video_id
+        self.signals = YoutubeVideoInfo.Signals()
+    
+    def get_info(self):
+        url = f"https://youtube.googleapis.com/youtube/v3/videos?part=contentDetails&id={self.video_id}&key={self.api_key}"
+        headers = {
+            "Accept": "application/json"
+        }
+        r = requests.get(url, headers=headers)
+        self.signals.log.emit(r.text, LogLevel.DEBUG)
+        if r.status_code >= 200 and r.status_code < 400:
+            try:
+                return r.json()
+            except json.decoder.JSONDecodeError as e:
+                self.signals.log.emit("Error processing response from Youtube API", LogLevel.INFO)
+                self.signals.log.emit(str(e), LogLevel.ERROR)
+        else:
+            self.signals.log.emit(f"Error status code {r.status_code} from Youtube API", LogLevel.ERROR)
+        return None
+
+    @Slot()
+    def run(self):
+        result = {
+            "error": False,
+            "us_blocked": False,
+            "au_blocked": False
+        }
+        info = self.get_info()
+        if not info:
+            result["error"] = True
+        else:
+            blocked = info["items"][0]["contentDetails"]["regionRestriction"]["blocked"]
+            result["us_blocked"] = "US" in blocked
+            result["au_blocked"] = "AU" in blocked
+        self.signals.done.emit(result)
+
+
 class YoutubeDownloader(QRunnable):
 
     class Signals(QObject):
@@ -577,6 +1082,7 @@ class YoutubeDownloader(QRunnable):
         try:
             self.signals.log.emit(f"Youtube URL [{self.youtube_url}]", LogLevel.DEBUG)
             self.youtube_obj = YouTube(self.youtube_url)
+            print(self.youtube_obj.vid_info)
         except Exception as e:
             self.signals.log.emit(repr(e), LogLevel.ERROR)
         if(self.youtube_obj is None):

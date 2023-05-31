@@ -940,13 +940,12 @@ p, li { white-space: pre-wrap; }
      <string>&amp;File</string>
     </property>
     <addaction name="action_new_lp"/>
-    <addaction name="action_open_lp"/>
     <addaction name="action_save_lp"/>
     <addaction name="separator"/>
     <addaction name="action_import_lp"/>
     <addaction name="action_export_lp"/>
+    <addaction name="action_backup"/>
     <addaction name="separator"/>
-    <addaction name="action_open_lpdir"/>
     <addaction name="action_open_configdir"/>
     <addaction name="separator"/>
     <addaction name="action_exit"/>
@@ -1059,6 +1058,11 @@ p, li { white-space: pre-wrap; }
   <action name="action_export_lp">
    <property name="text">
     <string>Export LightPlan</string>
+   </property>
+  </action>
+  <action name="action_backup">
+   <property name="text">
+    <string>Backup LightPlans</string>
    </property>
   </action>
  </widget>

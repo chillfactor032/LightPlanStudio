@@ -4,6 +4,7 @@ import sys
 import datetime
 import json
 import time
+from urllib import response
 from urllib.parse import ParseResultBytes
 import requests
 from pytube import YouTube
@@ -12,12 +13,13 @@ from enum import Enum
 import hashlib
 import unicodedata
 import re
+import shutil
 
 # PySide6 Imports
 from PySide6.QtWidgets import (QApplication, QMainWindow, QStyle, 
                             QDialog, QInputDialog, QSplashScreen, 
                             QMessageBox,QAbstractItemView, 
-                            QLineEdit, QFileDialog, QMenu, QTableWidgetItem)
+                            QLineEdit, QFileDialog, QMenu, QTableWidgetItem, QTreeWidgetItem)
 from PySide6.QtCore import (QFile, Slot, Signal, QObject, QStandardPaths,
                             QSettings, QTextStream, Qt, QTimer, QThreadPool, QFileSystemWatcher, \
                             QUrl, QSize)
@@ -32,8 +34,10 @@ import UI_Components as UI
 from LightPlanStudioLib import *
 
 class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
-    def __init__(self, app_name, version):
+    def __init__(self, app_name, version, app):
         super(LightPlanStudio, self).__init__()
+
+        self.app = app
 
         #Read Version File From Resources
         version_file = QFile(":version.json")
@@ -44,6 +48,9 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         self.app_name = self.version_dict["product_name"]
         self.version = self.version_dict["version"]
         self.repo = "https://github.com/chillfactor032/LightPlanStudio"
+        self.lightplan_studio_key = "a1a33b06"
+        self.youtube_key_url = "http://lightplanstudio.com/api/youtube_get_key.php"
+        self.youtube_api_key = None
 
         #Load UI Components
         self.setupUi(self)
@@ -155,10 +162,16 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         self.event_table_view.setStyleSheet("QTableView:disabled {background-color:#ffffff;}")
         self.twitch_connect_button.setCheckable(True)
         self.control_startlp_button.setCheckable(True)
-        self.lp_tree_context_menu = QMenu()
         self.lp_tree_context_delete_action = QAction("Delete LightPlan")
-        self.lp_tree_context_menu.addAction(self.lp_tree_context_delete_action)
         self.lp_tree_context_delete_action.triggered.connect(self.lp_tree_delete_clicked)
+        self.lp_tree_context_move_action = QAction("Move Item")
+        self.lp_tree_context_move_action.triggered.connect(self.lp_tree_move_clicked)
+        self.lp_tree_context_create_action = QAction("Create Root Folder")
+        self.lp_tree_context_create_action.triggered.connect(self.lp_tree_create_clicked)
+        self.lp_tree_context_createroot_action = QAction("Create Top Level Folder")
+        self.lp_tree_context_createroot_action.triggered.connect(self.lp_tree_createroot_clicked)
+        self.lp_tree_context_rename_action = QAction("Rename Folder")
+        self.lp_tree_context_rename_action.triggered.connect(self.lp_tree_rename_clicked)
         self.lp_tree_view.setContextMenuPolicy(Qt.CustomContextMenu)
         self.lp_tree_view.customContextMenuRequested.connect(self.lptree_show_context_menu)
         int_validator = QIntValidator(self)
@@ -166,8 +179,8 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
 
         #Set window Icon
         default_icon_pixmap = QStyle.StandardPixmap.SP_FileDialogListView
-        lps_icon_pixmap = QPixmap(":resources/img/icon.ico")
-        self.lightplan_icon = QIcon(lps_icon_pixmap)
+        self.lps_icon_pixmap = QPixmap(":resources/img/icon.ico")
+        self.lightplan_icon = QIcon(self.lps_icon_pixmap)
         default_icon = self.style().standardIcon(default_icon_pixmap)
         if(self.lightplan_icon):
             self.setWindowIcon(self.lightplan_icon)
@@ -219,6 +232,9 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
                 self.log("Could not update commands")
         self.custom_cmds = self.settings.value("LightPlanStudio/UpdateCmdsOnStart", False)
 
+        #Get Youtube API Key
+        self.get_youtube_api_key()
+
         ## Event Table ##
         self.lp_table_model = LightPlanTableModel(self.event_table_view, [], self.get_commands())
         self.lp_table_model.action_set_start_event.triggered.connect(self.click_set_start_event)
@@ -235,6 +251,7 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         self.action_export_lp.triggered.connect(self.menu_click)
         self.action_open_lpdir.triggered.connect(self.menu_click)
         self.action_open_configdir.triggered.connect(self.menu_click)
+        self.action_backup.triggered.connect(self.menu_click)
         self.action_exit.triggered.connect(self.menu_click)
         self.action_settings.triggered.connect(self.menu_click)
         self.action_show_log.triggered.connect(self.menu_click)
@@ -266,8 +283,6 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         self.volume_slider.sliderReleased.connect(self.volume_change_event)
         self.volume_changed()
 
-        
-
         ## ThreadPool
         self.threadpool = QThreadPool()
         
@@ -277,6 +292,10 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         # Setup UI Based on Config
         self.check_showlog()
         self.set_status(self.status_msg)
+
+        #Create Connection to LightPlan SQLite DB
+        self.lightplan_db = LightPlanDB(self.version, self.lp_db_path)
+        self.lightplan_db.signals.log.connect(self.log)
 
         # LightPlan Explorer Tab
         self.lp_tree_model = LightPlanTreeModel()
@@ -288,29 +307,26 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         self.lp_tree_view.setDropIndicatorShown(True)
         self.lp_tree_view.setIndentation(12)
         self.lp_tree_view.doubleClicked.connect(self.lp_tree_doubleclicked)
-        self.lp_tree_view.expanded.connect(self.lptree_item_expanded)
-        self.lp_tree_view.collapsed.connect(self.lptree_item_collapsed)
-        self.reset_fswatcher()
+
+        #New code for SQLite
+        self.update_lightplan_explorer()
 
         # StreamerSongList Integration
         self.streamer_song_list = StreamerSongList(0)
 
         #Set initial lightplan
-        self.current_lightplan = {"path": None}
+        self.current_lightplan = {
+            "id": 0,
+            "folder_id": 0
+        }
         self.current_lightplan["lightplan"] = self.lightplan_gui_to_dict()
         self.current_lightplan["md5"] = hashlib.md5(str(self.current_lightplan["lightplan"]).encode("utf-8")).hexdigest()
-
-        #Create Connection to LightPlan SQLite DB
-        self.lightplan_db = LightPlanDB(self.lp_db_path)
-        self.lightplan_db.signals.log.connect(self.log)
-        lps = self.lightplan_db.fetch_all_lightplans()
-        print(lps)
 
         # Initialize Window Geometry
         geometry = self.settings.value("LightPlanStudio/geometry")
         window_state = self.settings.value("LightPlanStudio/windowState")
-        if(geometry and window_state):
-            self.restoreGeometry(geometry) 
+        if geometry and window_state:
+            self.restoreGeometry(geometry)
             self.restoreState(window_state)
         self.refresh_ssl_layout()
 
@@ -324,14 +340,13 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         elif(sender == self.action_save_lp):
             self.click_save_button()
         elif(sender == self.action_import_lp):
-            self.log("Ohhh a new feature is coming!", LogLevel.INFO)
-            self.log("Import LightPlan - not implemented yet", LogLevel.DEBUG)
             self.import_lightplans()
+            self.update_lightplan_explorer()
         elif(sender == self.action_export_lp):
             self.log("Ohhh a new feature is coming!", LogLevel.INFO)
             self.log("Export LightPlan - not implemented yet", LogLevel.DEBUG)
-        elif(sender == self.action_open_lpdir):
-            os.startfile(self.lightplan_dir)
+        elif(sender == self.action_backup):
+            self.generate_backup_file()
         elif(sender == self.action_open_configdir):
             os.startfile(self.config_dir)
         elif(sender == self.action_exit):
@@ -341,12 +356,12 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         elif(sender == self.action_show_log):
             self.toggle_logvisible()
         elif(sender == self.action_help_about):
-            self.get_expanded_tree_objs()
+            self.update_lightplan_explorer()
             QMessageBox.about(self, "LightPlan Studio", self.about_text)
         elif(sender == self.action_help_oauth):
             QDesktopServices.openUrl(QUrl("https://www.twitchapps.com/tmi/"))
         elif(sender == self.action_help_docs):
-            QDesktopServices.openUrl(QUrl("http://lightplanstudio.com/wiki/doku.php"))
+            QDesktopServices.openUrl(QUrl("https://lightplanstudio.com/wiki/doku.php"))
         elif(sender == self.action_help_checkcmds):
             cmds = self.fetch_commands()
             if(cmds["commands"] is not None and cmds["commands"] != self.defaultCommands):
@@ -356,6 +371,94 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
             else:
                 QMessageBox.information(self, "LightPlan Studio", "Commands are up to date.")
     
+    def generate_backup_file(self):
+        now = int(time.time())
+        suggested_filename = f"LPSBackup_{self.version}_{now}.lps"
+        backup_file_path = os.path.join(self.config_dir, suggested_filename).replace("\\", "/")
+        folders = self.lightplan_db.fetch_all_folders()
+        lightplans = self.lightplan_db.fetch_all_lightplans()
+        backup_dict = {
+            "version": self.version,
+            "date": datetime.datetime.timestamp(datetime.datetime.now()),
+            "folders": [],
+            "lightplans": [],
+        }
+        for folder in folders:
+            backup_dict["folders"].append(folder)
+        for lp in lightplans:
+            backup_dict["lightplans"].append(lp)
+        with open(backup_file_path, "w") as file:
+            json.dump(backup_dict, file)
+        QMessageBox.information(self, "Backup File", f"Backup file created in config directory:\n\n{backup_file_path}")
+        self.log(f"Created Backup File {suggested_filename}", LogLevel.INFO)
+        self.log(f"Created Backup File {backup_file_path}", LogLevel.DEBUG)
+
+    def restore_backup_file(self):
+        now = int(time.time())
+        suggested_filename = f"LPSBackup_{self.version}_{now}.lps"
+        backup_file_path = os.path.join(self.config_dir, suggested_filename).replace("\\", "/")
+        folders = self.lightplan_db.fetch_all_folders()
+        lightplans = self.lightplan_db.fetch_all_lightplans()
+        backup_dict = {
+            "version": self.version,
+            "date": datetime.datetime.timestamp(datetime.datetime.now()),
+            "folders": [],
+            "lightplans": [],
+        }
+        for folder in folders:
+            backup_dict["folders"].append(folder)
+        for lp in lightplans:
+            backup_dict["lightplans"].append(lp)
+        with open(backup_file_path, "w") as file:
+            json.dump(backup_dict, file)
+        QMessageBox.information(self, "Backup File", f"Backup file created in config directory:\n\n{backup_file_path}")
+        self.log(f"Created Backup File {suggested_filename}", LogLevel.INFO)
+        self.log(f"Created Backup File {backup_file_path}", LogLevel.DEBUG)
+
+    def get_youtube_api_key(self):
+        headers = {"User-Agent": f"LightPlan Studio {self.version}"}
+        #headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko)"}
+        params = {"key": self.lightplan_studio_key}
+        try:
+            response = requests.get(self.youtube_key_url, params=params, headers=headers)
+            if(response.status_code == 200):
+                try:
+                    jsonObj = response.json()
+                    self.youtube_api_key = jsonObj["youtube_api_key"]
+                    self.log("Fetched Youtube API Key from LightPlanStudio.com", LogLevel.INFO)
+                    return True
+                except json.decoder.JSONDecodeError as e:
+                    self.log("Error fetching Youtube API Key from LightPlanStudio.com", LogLevel.ERROR)
+                    self.log(str(e), LogLevel.ERROR)
+                    self.log(response.text, LogLevel.DEBUG)
+            else:
+                try:
+                    self.log(f"Status Code {response.status_code} when fetching Youtube API Key from LightplanStudio.com", LogLevel.ERROR)
+                    jsonObj = response.json()
+                    msg = jsonObj["message"]
+                    self.log(msg, LogLevel.ERROR)
+                except json.decoder.JSONDecodeError as e:
+                    self.log("Error processing response from LightPlanStudio.com", LogLevel.ERROR)
+                    self.log(str(e), LogLevel.ERROR)
+                self.log(response.text, LogLevel.DEBUG)
+        except Exception as e:
+            self.log("Error while fetching Youtube API Key", LogLevel.ERROR)
+            self.log(str(e), LogLevel.ERROR)
+        return False
+
+    def youtube_region_check(self, result):
+        if result and not result["error"]:
+            if result["us_blocked"] or result["au_blocked"]:
+                if result["us_blocked"] == True and result["au_blocked"] == False:
+                    QMessageBox.warning(self, "LightPlan Studio", "Your Youtube video is blocked in the US.")
+                elif result["us_blocked"] == False and result["au_blocked"] == True:
+                    QMessageBox.warning(self, "LightPlan Studio", "Your Youtube video is blocked in Australia.")
+                else:
+                    QMessageBox.warning(self, "LightPlan Studio", "Your Youtube video is blocked in both the US and Australia.")
+            else:
+                self.log("Youtube Video is NOT region blocked", LogLevel.DEBUG)
+
+
     ## SSL Integration Functions
     def check_start_ssl_connection(self):
         ssl_int = valueToBool(self.settings.value("StreamerSongList/IntegrationEnabled", False))
@@ -423,7 +526,7 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         lp = sender.data
         if not lp:
             return
-        self.open_lp_file(lp["path"])
+        self.open_lp(lp["id"])
         self.click_start_lightplan()
 
     def ssl_connected(self):
@@ -453,173 +556,230 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
                     self.log(f"Matched SSL Song: {artist} - {title}", LogLevel.DEBUG)
         self.refresh_ssl_layout(queue)
     
-    # Setup FileSystemWatcher To keep the LP Explorer Updated
-    def reset_fswatcher(self):
-        if(self.file_watcher is not None):
-            del self.file_watcher
-        self.file_watcher = QFileSystemWatcher()
-        self.refresh_lptree()
-        self.file_watcher.addPath(self.lightplan_dir)
-        for root, dirs, files in os.walk(self.lightplan_dir):
-            for dir in dirs:
-                self.file_watcher.addPath(os.path.join(root, dir))
-        self.file_watcher.directoryChanged.connect(self.refresh_lptree)
+    # New LightPlan Explorer Code
+    def update_lightplan_explorer(self):
+        expanded = self.get_expanded_tree_objs()
+        print("Previously Expanded LP Tree Items:")
+        for e in expanded:
+            print(f"{e.artist} - {e.title} id: {e.id} parent_id: {e.parent_id}")
+
+        lightplans = self.lightplan_db.fetch_all_lightplans()
+        folders = self.lightplan_db.fetch_all_folders()
+        self.lp_tree_model.clear()
+        self.lp_tree_model.setHorizontalHeaderLabels(['LightPlans'])
+        folder_items = []
+        lightplan_items = []
+        artist_items = []
+
+        # Create all folder objects
+        for folder in folders:
+            folder_obj = LightPlanTreeItem(folder["name"], TreeItemType.FOLDER)
+            folder_obj.setEditable(False)
+            folder_obj.setData(folder["name"], Qt.DisplayRole)
+            folder_obj.setData(folder, Qt.UserRole)
+            folder_obj.setIcon(self.dir_icon)
+            folder_obj.setParentId(folder["parent_id"])
+            folder_obj.setId(folder["folder_id"])
+            folder_items.append(folder_obj)
+
+        # Create all lightplan objects
+        for lightplan in lightplans:
+            folder_obj = LightPlanTreeItem(lightplan["song_title"], TreeItemType.LIGHTPLAN)
+            folder_obj.setEditable(False)
+            folder_obj.setData(lightplan["song_title"], Qt.DisplayRole)
+            folder_obj.setData(lightplan, Qt.UserRole)
+            folder_obj.setIcon(self.lightplan_icon)
+            folder_obj.setParentId(lightplan["folder_id"])
+            folder_obj.setArtist(lightplan["song_artist"])
+            folder_obj.setTitle(lightplan["song_title"])
+            folder_obj.setId(lightplan["lightplan_id"])
+            lightplan_items.append(folder_obj)
+
+        # Add the lightplans to the treeview
+        for item in lightplan_items:
+            #Find the artist parent
+            artist_item = None
+            for ai in artist_items:
+                if ai.artist == item.artist and ai.parent_id == item.parent_id:
+                    artist_item = ai
+                    break
+            if not artist_item:
+                #Create artist item if it doesnt exist
+                artist_item = LightPlanTreeItem(item.artist, TreeItemType.ARTIST)
+                artist_item.setArtist(item.artist)
+                artist_item.setTitle(item.title)
+                artist_item.setParentId(item.parent_id)
+                artist_item.setEditable(False)
+                artist_items.append(artist_item)
+            artist_item.appendRow(item)
+
+        # Create the hierarchy of folders
+        for folder in folder_items:
+            if folder.parent_id == 0:
+                #Root Item
+                self.lp_tree_model.appendRow(folder)
+            else:
+                #Find parent item and the folder to it
+                for x in range(0, len(folder_items)):
+                    if folder_items[x].id == folder.parent_id:
+                        print(f"Adding item to parent ({folder_items[x].id}) : {folder.id}")
+                        folder_items[x].appendRow(folder)
+
+        # Add the artist items to the tree model
+        for artist_item in artist_items:
+            if artist_item.parent_id == 0:
+                self.lp_tree_model.appendRow(artist_item)
+            else:
+                for x in range(0, len(folder_items)):
+                        if folder_items[x].id == artist_item.parent_id:
+                            folder_items[x].appendRow(artist_item)
+
+        #Re-expand previously expanded items
+        for expanded_item in expanded:
+            for item in folder_items:
+                if item.id == expanded_item.id and item.parent_id == expanded_item.parent_id:
+                    index = self.lp_tree_model.indexFromItem(item)
+                    print(f"Re-expanding folder ({item.name})")
+                    self.lp_tree_view.expand(index)
+            for item in artist_items:
+                if item.artist == expanded_item.artist and item.parent_id == expanded_item.parent_id:
+                    index = self.lp_tree_model.indexFromItem(item)
+                    print(f"Re-expanding artist ({item.name})")
+                    self.lp_tree_view.expand(index)
 
     def get_expanded_tree_objs(self):
         expanded = []
         indexes = self.lp_tree_model.persistentIndexList()
         for index in indexes:
             if(self.lp_tree_view.isExpanded(index)):
-                path = []
-                data = index.data()
-                path.append(data)
-                parent = index.parent()
-                parent_data = parent.data()
-                while parent_data is not None:
-                    path.append(parent.data())
-                    parent = parent.parent()
-                    parent_data = parent.data()
-                expanded.append(path)
+                item = self.lp_tree_model.item(index.row())
+                expanded.append(item)
         return expanded
-
-    def refresh_lptree(self, path=None):
-        self.lp_tree_model.clear()
-        self.lp_tree_model.setHorizontalHeaderLabels(['LightPlans'])
-        self.lightplan_files = []
-        result = sorted(Path(self.lightplan_dir).rglob("*.plan"))
-        lightplan = {}
-        for plan in result:
-            with open(plan, 'r') as json_file:
-                try:
-                    obj = {}
-                    lightplan = json.load(json_file)
-                    if("song_artist" not in lightplan or "song_title" not in lightplan):
-                        continue
-                    obj["path"] = plan.__str__().replace("\\", "/")
-                    # If parent directory not the lightplan dir, add a parent item
-                    dir_path = os.path.dirname(obj["path"])
-                    if(dir_path and dir_path != self.lightplan_dir):
-                        dir = os.path.basename(dir_path)
-                        parent_items = self.lp_tree_model.findItems(dir)
-                        if(len(parent_items) == 0):
-                            # Create Parent Item if it doesnt exist
-                            parent = QStandardItem(dir)
-                            parent.setEditable(False)
-                            parent.setData(dir, Qt.DisplayRole)
-                            parent.setData("Directory", Qt.UserRole)
-                            parent.setIcon(self.dir_icon)
-                            self.lp_tree_model.appendRow(parent)
-                            obj["parent"] = parent
-                        else:
-                            obj["parent"] = parent_items[0]
-                    else:
-                        obj["parent"] = None
-                    obj["artist"] = lightplan["song_artist"]
-                    obj["title"] = lightplan["song_title"]
-                    obj["ssl_id"] = lightplan["ssl_id"]
-                    self.lightplan_files.append(obj)
-                except ValueError as err:
-                    self.log(repr(err), LogLevel.ERROR)
-                    continue
-
-        ## Now assume all items have had their parent created
-        for lp in self.lightplan_files:
-            item = QStandardItem(lp["title"])
-            item.setEditable(False)
-            item.setData(lp["path"], Qt.UserRole)
-            item.setData(lp["title"], Qt.DisplayRole)
-            item.setIcon(self.lightplan_icon)
-            artist_item = None
-            artist_items = self.lp_tree_model.findItems(lp["artist"], Qt.MatchExactly)
-
-            # Match the artist name to the artist item with the correct parent
-            for ai in artist_items:
-                if(ai.parent() == lp["parent"]):
-                    artist_item = ai
-                    break
-            
-            # If artist not matched, create the artist item with correct parent
-            if(artist_item is None):
-                artist_item = QStandardItem(lp["artist"])
-                artist_item.setEditable(False)
-                artist_item.setData(lp["artist"], Qt.DisplayRole)
-                artist_item.setData("Artist", Qt.UserRole)
-                if(lp["parent"] is not None):
-                    lp["parent"].appendRow(artist_item)
-                else:
-                    self.lp_tree_model.appendRow(artist_item)
-            # Add the song item to the artist item
-            artist_item.appendRow(item)
-
-        # Expand the items previous expanded
-        c = self.lp_tree_model.rowCount()
-        temp_list = []
-        for x in range(0, c):
-            index = self.lp_tree_model.index(x, 0)
-            index_str = self.treeindex_to_str(index)
-            if(index_str in self.expanded_tree_items):
-                self.lp_tree_view.expand(index)
-                temp_list.append(index_str)
-            num_children = self.lp_tree_model.rowCount(index)
-            for y in range(0, num_children):
-                child_index = self.lp_tree_model.index(y, 0, index)
-                child_index_str = self.treeindex_to_str(child_index)
-                if(child_index_str in self.expanded_tree_items):
-                    self.lp_tree_view.expand(child_index)
-                    temp_list.append(child_index_str)
-        self.expanded_tree_items = temp_list.copy()
-
-    def treeindex_to_str(self, index):
-        index_list = []
-        index_list.append(index.data())
-        parent = index.parent()
-        p_data = parent.data()
-        while p_data is not None:
-            index_list.append(p_data)
-            parent = parent.parent()
-            p_data = parent.data()
-        return ','.join(index_list)
-
-    def lptree_item_expanded(self, index):
-        index_str = self.treeindex_to_str(index)
-        if(index_str not in self.expanded_tree_items):
-            self.expanded_tree_items.append(index_str)
-
-    def lptree_item_collapsed(self, index):
-        index_str = self.treeindex_to_str(index)
-        if(index_str in self.expanded_tree_items):
-            self.expanded_tree_items.remove(index_str)
                     
     def lp_tree_doubleclicked(self):
         index = self.lp_tree_view.selectedIndexes()[0]
         selected = index.model().itemFromIndex(index)
-        if(selected.data(Qt.UserRole) not in ["Artist", "Directory"]):
-            data = selected.data(Qt.UserRole)
-            self.check_save_lightplan()
-            self.open_lp_file(data)
+        if selected.get_type() == TreeItemType.LIGHTPLAN:
+            self.open_lp(selected.id)
+
+    def lp_tree_createroot_clicked(self):
+        response = QInputDialog.getText(self, "Create Top Level Folder", "Folder Name:", QLineEdit.Normal, "")
+        if response[1]:
+            self.lightplan_db.create_folder(0, response[0])
+            self.update_lightplan_explorer()
 
     def lptree_show_context_menu(self):
-        self.lp_tree_context_menu.popup(QCursor.pos())
+        lp_tree_context_menu = QMenu(self.lp_tree_view)
+        lp_tree_context_menu.addAction(self.lp_tree_context_createroot_action)
+        indexes = self.lp_tree_view.selectedIndexes()
+
+        # No Item Selected
+        if len(indexes) == 0:
+            lp_tree_context_menu.popup(QCursor.pos())
+            return
+
+        item = self.lp_tree_model.itemFromIndex(indexes[0])
+        
+        # If not top level item, add Create action
+        if item.parent_id != 0 or item.get_type() == TreeItemType.FOLDER:
+            if item.get_type() == TreeItemType.FOLDER:
+                parent_folder = self.lightplan_db.fetch_folder(item.id)
+            else:
+                parent_folder = self.lightplan_db.fetch_folder(item.parent_id)
+            if parent_folder:
+                self.lp_tree_context_create_action.setText(f"Create Folder In [{parent_folder['name']}]")
+            else:
+                self.lp_tree_context_create_action.setText(f"Create Folder Here")
+            lp_tree_context_menu.addAction(self.lp_tree_context_create_action)
+
+        type_str = str(item.get_type())
+
+        # Add move action
+        lp_tree_context_menu.addSeparator()
+
+        # Temporarily disable moving whole artists
+        self.lp_tree_context_move_action.setEnabled(item.get_type() != TreeItemType.ARTIST)
+        
+        self.lp_tree_context_move_action.setText(f"Move {type_str} [{item.name}]")
+        lp_tree_context_menu.addAction(self.lp_tree_context_move_action)
+
+        # If Folder, add rename option
+        if item.get_type() == TreeItemType.FOLDER:
+            lp_tree_context_menu.addSeparator()
+            self.lp_tree_context_rename_action.setText(f"Rename {type_str} [{item.name}]")
+            lp_tree_context_menu.addAction(self.lp_tree_context_rename_action)
+
+        # Lastly but not leastily add delete action
+        lp_tree_context_menu.addSeparator()
+        self.lp_tree_context_delete_action.setText(f"Delete {type_str} [{item.name}]")
+        lp_tree_context_menu.addAction(self.lp_tree_context_delete_action)
+        lp_tree_context_menu.popup(QCursor.pos())
+
+    def lp_tree_rename_clicked(self):
+        indexes = self.lp_tree_view.selectedIndexes()
+        if len(indexes) == 0:
+            return
+        item = self.lp_tree_model.itemFromIndex(indexes[0])
+        if item.get_type() != TreeItemType.FOLDER:
+            return
+        response = QInputDialog.getText(self, "Rename Folder", "Folder Name:", QLineEdit.Normal, "")
+        if response[1]:
+            self.lightplan_db.rename_folder(item.id, response[0])
+            self.update_lightplan_explorer()
+
+    def lp_tree_move_clicked(self):
+        indexes = self.lp_tree_view.selectedIndexes()
+        if len(indexes) == 0:
+            return
+        item = self.lp_tree_model.itemFromIndex(indexes[0])
+        self.log(f"Move Clicked on Item {item.name}", LogLevel.DEBUG)
+        self.show_move_dialog(item)
+
+    def lp_tree_create_clicked(self):
+        indexes = self.lp_tree_view.selectedIndexes()
+        parent_id = 0
+        if len(indexes) == 0:
+            return
+        item = self.lp_tree_model.itemFromIndex(indexes[0])
+        if item.get_type() == TreeItemType.FOLDER:
+            #If item is a folder, the item becomes the parent of the new folder
+            parent_id = item.id
+        else:
+            #if item is not a folder, new folder's parent is same as item's parent
+            parent_id = item.parent_id
+        response = QInputDialog.getText(self, "Create Folder", "Folder Name:", QLineEdit.Normal, "")
+        if response[1]:
+            self.lightplan_db.create_folder(parent_id, response[0])
+            self.update_lightplan_explorer()
 
     def lp_tree_delete_clicked(self):
-        index = self.lp_tree_view.currentIndex()
-        selected = index.model().itemFromIndex(index)
-        if(selected.data(Qt.UserRole) not in ["Artist", "Directory"]):
-            parent = selected.parent()
-            artist = ""
-            if(parent is not None):
-                artist = parent.data(Qt.DisplayRole)
-            title = selected.data(Qt.DisplayRole)
-            choice = QMessageBox.question(self, 
-                "LightPlan Studio",
-                f"Are you sure you want to delete LightPlan?\n{artist} - {title}",
-                (QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No),
-                QMessageBox.StandardButton.No)
-            path = selected.data(Qt.UserRole)
-            if(os.path.exists(path) and choice == QMessageBox.StandardButton.Yes):
-                self.log(f"Deleted: {artist} - {title}")
-                self.log(f"Deleted: {path}", LogLevel.DEBUG)
-                os.remove(path)
+        indexes = self.lp_tree_view.selectedIndexes()
+        if len(indexes) == 0:
+            return
+        item = self.lp_tree_model.itemFromIndex(indexes[0])
+        if item.get_type() == TreeItemType.FOLDER:
+            msg = f"Are you sure you want to delete folder {item.name}?\n\nThis will also delete any subfolders and LightPlans in the folder. This action cannot be undone!"
+        elif item.get_type() == TreeItemType.LIGHTPLAN:
+            msg = f"Are you sure you want to delete LightPlan {item.artist} - {item.title}?\n\n This action cannot be undone!"
+        else:
+            return
+        
+        choice = QMessageBox.question(self, 
+            "LightPlan Studio",
+            msg,
+            (QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No),
+            QMessageBox.StandardButton.No)
+        if choice == QMessageBox.StandardButton.Yes:
+            if item.get_type() == TreeItemType.FOLDER:
+                if self.lightplan_db.delete_folder(item.id):
+                    self.log(f"Deleted Folder {item.name}")
+            elif item.get_type() == TreeItemType.LIGHTPLAN:
+                if self.lightplan_db.delete_lightplan(item.id):
+                    self.log(f"Deleted LightPlan {item.artist} - {item.title}")
+            else:
+                #Handle deleting an artist
+                pass
+            self.update_lightplan_explorer()
 
     def clear_lightplan(self):
         self.lp_songtitle_edit.clear()
@@ -644,7 +804,7 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
                     QMessageBox.information(self, "LightPlan Studio", "LightPlan Saved")
         self.clear_lightplan()
         self.current_lightplan["lightplan"] = self.lightplan_gui_to_dict()
-        self.current_lightplan["path"] = None
+        self.current_lightplan["id"] = None
         self.current_lightplan["md5"] = hashlib.md5(str(self.current_lightplan["lightplan"]).encode("utf-8")).hexdigest()
         self.set_status("New LightPlan")
 
@@ -657,16 +817,22 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
     
     ## LightPlan File Functions ##
     def import_lightplans(self):
-        self.log("Import LP", LogLevel.DEBUG)
-        file_name = QFileDialog.getOpenFileNames(self, "Import LightPlans", self.lightplan_dir, "LightPlans (*.plan)")
-        if(file_name):
-            for f in file_name[0]:
+        files = QFileDialog.getOpenFileNames(self, "Import LightPlans", self.lightplan_dir, "LightPlans (*.plan)")
+        if(files):
+            target_folder = self.get_folder_selection()
+            if not target_folder:
+                target_folder = {
+                    "folder_id": 0,
+                    "parent_id": 0,
+                    "name": ""
+                }
+            for f in files[0]:
                 self.log(f"Importing LightPlan {f}", LogLevel.DEBUG)
                 with open(f) as plan:
                     lp = json.load(plan)
-                    self.lightplan_db.import_lightplan(lp)
-                    break
-                    
+                    result = self.lightplan_db.insert_lightplan(lp, target_folder["folder_id"])
+                    if(result):
+                        self.log(f"Created Lightplan with Id: {result}", LogLevel.DEBUG)
 
     def check_save_lightplan(self):
         if(self.checkLightPlanUpdated()):
@@ -681,18 +847,14 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
     def show_file_dialog(self):
         file_name = QFileDialog.getOpenFileName(self, "Open LightPlan", self.lightplan_dir, "LightPlans (*.plan)")
         if(file_name):
-            self.open_lp_file(file_name[0])
+            self.open_lp(file_name[0])
         self.log(f"Opening LightPlan File: {file_name}")
 
-    def open_lp_file(self, lp_path):
+    def open_lp(self, lp_id):
         lightplan_dict = None
-        if(not os.path.exists(lp_path)):
-            return
-        try:
-            with open(lp_path, "r") as file:
-                lightplan_dict = json.load(file)
-        except json.JSONDecodeError as err:
-            self.log(str(err), LogLevel.ERROR)
+        lightplan_dict = self.lightplan_db.fetch_lightplan(lp_id)
+        if not lightplan_dict:
+            self.log(f"Error fetching LightPlan with Id: {lp_id}", LogLevel.ERROR)
             return
         self.clear_lightplan()
         self.lp_songtitle_edit.setText(lightplan_dict["song_title"])
@@ -706,7 +868,7 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
             spotify_id = ""
         self.lp_sslid_edit.setText(ssl_id)
         self.lp_spotifyid_edit.setText(spotify_id)
-        self.lp_youtubeurl_edit.setText(lightplan_dict["youtube_url"])
+        self.lp_youtubeurl_edit.setText(lightplan_dict["video_url"])
         self.lp_notes_edit.setPlainText(lightplan_dict["notes"])
         self.start_event_edit.setText(msToStr(lightplan_dict["starting_ms"], True))
         self.lp_table_model.clear_events()
@@ -714,12 +876,15 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
             evt_obj = LightPlanEvent(evt["offset"],evt["command"],evt["comment"],valueToBool(evt["ignore_delay"]))
             self.lp_table_model.insert_event(evt_obj)
         self.current_lightplan = {
-            "path": lp_path,
+            "id": lightplan_dict["lightplan_id"],
+            "folder_id": lightplan_dict["folder_id"],
             "md5": hashlib.md5(str(lightplan_dict).encode("utf-8")).hexdigest(),
             "lightplan": lightplan_dict
         }
+        self.log(f"Opened LightPlan {self.current_lightplan['id']}", LogLevel.DEBUG)
+        self.log(f"{self.current_lightplan['lightplan']['song_artist']} - {self.current_lightplan['lightplan']['song_title']}", LogLevel.INFO)
         self.update_progressbar()
-        self.set_status(self.current_lightplan["path"])
+        self.set_status(f"{self.current_lightplan['lightplan']['song_artist']} - {self.current_lightplan['lightplan']['song_title']}")
 
     def checkLightPlanUpdated(self):
         lp = self.lightplan_gui_to_dict()
@@ -728,12 +893,14 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
     def lightplan_gui_to_dict(self):
         self.lp_table_model.sort(0,Qt.AscendingOrder)
         lightplan_dict = {
+            "lightplan_id": self.current_lightplan["id"],
+            "folder_id": self.current_lightplan["folder_id"],
             "song_title": "",
             "song_artist": "",
             "author": "",
             "ssl_id": 0,
             "spotify_id": 0,
-            "youtube_url": "",
+            "video_url": "",
             "notes": "",
             "starting_ms": 0,
             "events": []
@@ -742,19 +909,20 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         lightplan_dict["song_artist"] = self.lp_artist_edit.text().strip()
         lightplan_dict["author"] = self.lp_author_edit.text().strip()
         try:
-            ssl_id = int(self.lp_sslid_edit.text().strip())
+            ssl_id = int(self.lp_sslid_edit.text().strip(), 10)
         except ValueError as ve:
             ssl_id = 0
         try:
-            spotify_id = int(self.lp_spotifyid_edit.text().strip())
+            spotify_id = int(self.lp_spotifyid_edit.text().strip(), 10)
         except ValueError as ve:
             spotify_id = 0
         lightplan_dict["ssl_id"] = ssl_id
         lightplan_dict["spotify_id"] = spotify_id
-        lightplan_dict["youtube_url"] = self.lp_youtubeurl_edit.text().strip()
+        lightplan_dict["video_url"] = self.lp_youtubeurl_edit.text().strip()
         lightplan_dict["notes"] = self.lp_notes_edit.toPlainText().strip()
         lightplan_dict["starting_ms"] = strToMs(self.start_event_edit.text().strip())
         lightplan_dict["events"] = self.lp_table_model.exportJsonDict()
+        lightplan_dict["lightplan_id"] = self.current_lightplan["id"]
         return lightplan_dict
     
     def save_light_plan(self):
@@ -763,17 +931,28 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         if(len(self.current_lightplan["lightplan"]["song_title"].strip())==0 or len(self.current_lightplan["lightplan"]["song_artist"].strip())==0):
             QMessageBox.warning(self, "LightPlan Studio", "Song Artist and Title are required.")
             return False
-        if(self.current_lightplan["path"] is None):
-            file_name = self.get_lp_basename(self.current_lightplan['lightplan']['song_artist'], self.current_lightplan['lightplan']['song_title'])
-            self.current_lightplan["path"] = os.path.join(self.lightplan_dir, file_name).replace("\\", "/")
-        lp_json = json.dumps(self.current_lightplan["lightplan"])
-        with open(self.current_lightplan["path"], "w") as file:
-            file.write(lp_json)
-        self.set_status("LightPlan Saved", 2500)
+        if(self.current_lightplan["id"] is None):
+            #If new LightPlan, insert into DB and get ID
+            id = self.lightplan_db.insert_lightplan(self.current_lightplan["lightplan"])
+            if id:
+                self.current_lightplan["id"] = id
+                self.current_lightplan["lightplan"]["lightplan_id"] = id
+                self.log(f"Saved LightPlan id = {id}", LogLevel.INFO)
+                self.set_status("LightPlan Saved", 2500)
+            else:
+                self.log("Error saving LightPlan", LogLevel.ERROR)
+        else:
+            #Existing LightPlan - just update
+            if self.lightplan_db.update_lightplan(self.current_lightplan["lightplan"]):
+                self.log(f"Saved LightPlan id = {self.current_lightplan['id']}", LogLevel.INFO)
+                self.set_status("LightPlan Saved", 2500)
+            else:
+                self.log("Error saving LightPlan", LogLevel.ERROR)
+        self.update_lightplan_explorer()
         return True
 
     def click_save_button(self):
-        if(self.checkLightPlanUpdated()):
+        if self.checkLightPlanUpdated():
             if(self.save_light_plan()):
                 self.log("LightPlan Saved")
                 self.log(self.current_lightplan["md5"], LogLevel.DEBUG)
@@ -880,6 +1059,8 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         self.lightplan_start_timer.stop()
         self.control_startlp_button.setChecked(False)
         self.control_startlp_button.setText("Start LightPlan")
+        self.delay_adjust_spinner.setValue(0)
+        self.delay_adjust_slider.setValue(0)
         self.set_status(msg, 2500)
 
     def lightplan_runner_progress(self, cur_evt_num, next_event_secs, next_event, original_index):
@@ -975,8 +1156,17 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
                     }
                     self.download_complete(True, data)
                     return
-
         self.loading()
+        #Check if youtube url is region blocked
+        if "youtube.com/watch?v=" in url:
+            parts = url.split("v=")
+            if len(parts) == 2:
+                parts = parts[1].split("&")
+                self.log(f"Looking Up Video Info for ID: {parts[0]}", LogLevel.DEBUG)
+                yti = YoutubeVideoInfo(self.youtube_api_key, parts[0])
+                yti.signals.log.connect(self.log)
+                yti.signals.done.connect(self.youtube_region_check)
+                self.threadpool.start(yti)
         filename = self.hash_str(url)+".mp4"
         audio_path = os.path.join(self.audio_dir, filename).replace("\\", "/")
         if(not os.path.exists(audio_path)):
@@ -1158,12 +1348,16 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         url = "https://lightplanstudio.com/api/commands.json"
         self.log(f"Requesting updated light commands {url}", LogLevel.DEBUG)
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko)"}
-        r = requests.get(url, headers=headers)
-        self.log(f"HTTP Status Code {r.status_code}", LogLevel.DEBUG)
-        if(r.status_code==200):
-            return r.json()
-        self.log("Could not fetch light commands!", LogLevel.ERROR)
-        self.log(r.text, LogLevel.ERROR)
+        try:
+            r = requests.get(url, headers=headers)
+            self.log(f"HTTP Status Code {r.status_code}", LogLevel.DEBUG)
+            if(r.status_code==200):
+                return r.json()
+            self.log("Could not fetch light commands!", LogLevel.ERROR)
+            self.log(r.text, LogLevel.ERROR)
+        except Exception as e:
+            self.log("Error requesting updated commands", LogLevel.ERROR)
+            self.log(str(e), LogLevel.ERROR)
         return None
 
     def show_ssl_match_dialog(self):
@@ -1223,6 +1417,29 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
             self.delay_lcd.display(str(round(self.stream_delay_ms/1000, 1)))
             self.log(f"Stream Delay: {self.stream_delay_ms}ms")
 
+    def get_folder_selection(self):
+        folders = self.lightplan_db.fetch_all_folders()
+        dlg = ItemMoveDialog(None, folders, self)
+        dlg.signals.log.connect(self.log)
+        result = dlg.exec()
+        if(result == QDialog.Accepted and dlg.selected_folder):
+            return dlg.selected_folder
+        return None
+        
+    def show_move_dialog(self, selected_item):
+        folders = self.lightplan_db.fetch_all_folders()
+        dlg = ItemMoveDialog(selected_item, folders, self)
+        dlg.signals.log.connect(self.log)
+        result = dlg.exec()
+        if(result == QDialog.Accepted):
+            if dlg.selected_folder:
+                self.log(f"Moving Item {selected_item.name} to folder {dlg.selected_folder['name']}")
+                if selected_item.get_type() == TreeItemType.FOLDER:
+                    self.lightplan_db.move_folder(selected_item.id, dlg.selected_folder["folder_id"])
+                else:
+                    self.lightplan_db.move_lightplan(selected_item.id, dlg.selected_folder["folder_id"])
+            self.update_lightplan_explorer()
+
     def closeEvent(self, evt):
         self.check_save_lightplan()
         if(self.key_listener):
@@ -1261,6 +1478,84 @@ class LightPlanStudio(QMainWindow, UI.Ui_LPS_MainWindow):
         msg = f'<span style="{style}">{timestamp} - {msg}</span>'
         self.debug_log_edit.append(msg)
 
+class ItemMoveDialog(QDialog):
+    class Signals(QObject):
+        log = Signal(str, LogLevel)
+    
+    def __init__(self, item, folders, parent=None):
+        super().__init__(parent)
+        self.selected_folder = None
+        self.signals = self.Signals()
+        self.ui = UI.Ui_ItemMoveDialog()
+        self.ui.setupUi(self)
+        self.check = True
+        if item:
+            if item.get_type() == TreeItemType.LIGHTPLAN:
+                self.ui.item_name.setText(f"LightPlan [{item.artist} - {item.title}]")
+            elif item.get_type() == TreeItemType.ARTIST:
+                self.ui.item_name.setText(f"Artist [{item.name}]")
+            elif item.get_type() == TreeItemType.FOLDER:
+                self.ui.item_name.setText(f"Folder [{item.name}]")
+            else:
+                self.ui.item_name.setText(f"{item.name}")
+        else:
+            self.ui.item_label.setFixedWidth(250)
+            self.ui.item_label.setText("Select Folder for Imported LightPlans")
+            self.ui.item_name.setVisible(False)
+            item = LightPlanTreeItem("None")
+            item.setId(0)
+            item.setParentId(0)
+            self.check = False
+
+        self.item = item
+        self.ui.cancel_button.clicked.connect(self.cancel_clicked)
+        self.ui.move_button.clicked.connect(self.move_clicked)
+        self.ui.folder_widget.setHeaderLabels(["LightPlan Folders"])
+        folder_items = []
+        root = {
+            "folder_id": 0,
+            "parent_id": 0,
+            "name": "LightPlans"
+        }
+        folders.insert(0, root)
+        for folder in folders:
+            item = FolderTreeWidgetItem(folder["name"], folder)
+            item.setText(0, folder["name"])
+            item.setIcon(0, parent.dir_icon)
+            folder_items.append(item)
+
+        for item in folder_items:
+            if item.folder_data["folder_id"] == 0:
+                continue
+            for parent in folder_items:
+                if parent.folder_data["folder_id"] == item.folder_data["parent_id"]:
+                    parent.addChild(item)
+
+        self.ui.folder_widget.insertTopLevelItems(0, folder_items)
+        self.ui.folder_widget.expandAll()
+
+    def move_clicked(self):
+        indexes = self.ui.folder_widget.selectedIndexes()
+        if len(indexes) > 0:
+            index = indexes[0]
+            item = self.ui.folder_widget.itemFromIndex(index)
+            if self.check:
+                if self.item.get_type() == TreeItemType.FOLDER:
+                    if item.folder_data["folder_id"] == self.item.id:
+                        QMessageBox.warning(self, "Move Error", "Cannot move a folder into itself.")
+                        return
+                    if item.folder_data["parent_id"] == self.item.parent_id:
+                        QMessageBox.warning(self, f"Move Error", "Folder is already in there!")
+                        return
+                else:
+                    if item.folder_data["folder_id"] == self.item.parent_id:
+                        QMessageBox.warning(self, "Move Error", "Item is already in there!")
+                        return
+            self.selected_folder = item.folder_data
+            self.accept()
+
+    def cancel_clicked(self):
+        self.reject()
 
 class LoadingDialog(QDialog):
 
@@ -1640,7 +1935,7 @@ if __name__ == "__main__":
     app.setStyleSheet("QToolTip { color: #ffffff; background-color: #2a82da; border: 1px solid white; }")
     """
 
-    window = LightPlanStudio(app_name, version)
+    window = LightPlanStudio(app_name, version, app)
     time.sleep(2.5)
     window.show()
     splash.finish(window)

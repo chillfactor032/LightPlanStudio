@@ -185,6 +185,8 @@ class Ui_LPS_MainWindow(object):
         self.action_import_lp.setObjectName(u"action_import_lp")
         self.action_export_lp = QAction(LPS_MainWindow)
         self.action_export_lp.setObjectName(u"action_export_lp")
+        self.action_backup = QAction(LPS_MainWindow)
+        self.action_backup.setObjectName(u"action_backup")
         self.centralwidget = QWidget(LPS_MainWindow)
         self.centralwidget.setObjectName(u"centralwidget")
         self.tabWidget = QTabWidget(self.centralwidget)
@@ -463,13 +465,12 @@ class Ui_LPS_MainWindow(object):
         self.menubar.addAction(self.menu_View.menuAction())
         self.menubar.addAction(self.menu_Help.menuAction())
         self.menu_File.addAction(self.action_new_lp)
-        self.menu_File.addAction(self.action_open_lp)
         self.menu_File.addAction(self.action_save_lp)
         self.menu_File.addSeparator()
         self.menu_File.addAction(self.action_import_lp)
         self.menu_File.addAction(self.action_export_lp)
+        self.menu_File.addAction(self.action_backup)
         self.menu_File.addSeparator()
-        self.menu_File.addAction(self.action_open_lpdir)
         self.menu_File.addAction(self.action_open_configdir)
         self.menu_File.addSeparator()
         self.menu_File.addAction(self.action_exit)
@@ -506,6 +507,7 @@ class Ui_LPS_MainWindow(object):
         self.action_open_configdir.setText(QCoreApplication.translate("LPS_MainWindow", u"Open Config Directory", None))
         self.action_import_lp.setText(QCoreApplication.translate("LPS_MainWindow", u"Import LightPlan", None))
         self.action_export_lp.setText(QCoreApplication.translate("LPS_MainWindow", u"Export LightPlan", None))
+        self.action_backup.setText(QCoreApplication.translate("LPS_MainWindow", u"Backup LightPlans", None))
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.lightPlanTab), QCoreApplication.translate("LPS_MainWindow", u"LightPlan Explorer", None))
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.sslTab), QCoreApplication.translate("LPS_MainWindow", u"SSL Queue", None))
         self.LightPlanBox.setTitle(QCoreApplication.translate("LPS_MainWindow", u"LightPlan", None))
@@ -556,6 +558,70 @@ class Ui_LPS_MainWindow(object):
         self.menu_Settings.setTitle(QCoreApplication.translate("LPS_MainWindow", u"&Edit", None))
         self.menu_Help.setTitle(QCoreApplication.translate("LPS_MainWindow", u"&Help", None))
         self.menu_View.setTitle(QCoreApplication.translate("LPS_MainWindow", u"&View", None))
+    # retranslateUi
+
+
+
+# -*- coding: utf-8 -*-
+
+################################################################################
+## Form generated from reading UI file 'LPS_MoveDialog.ui'
+##
+## Created by: Qt User Interface Compiler version 6.2.2
+##
+## WARNING! All changes made in this file will be lost when recompiling UI file!
+################################################################################
+
+from PySide6.QtCore import (QCoreApplication, QDate, QDateTime, QLocale,
+    QMetaObject, QObject, QPoint, QRect,
+    QSize, QTime, QUrl, Qt)
+from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
+    QFont, QFontDatabase, QGradient, QIcon,
+    QImage, QKeySequence, QLinearGradient, QPainter,
+    QPalette, QPixmap, QRadialGradient, QTransform)
+from PySide6.QtWidgets import (QApplication, QDialog, QHeaderView, QLabel,
+    QPushButton, QSizePolicy, QTreeWidget, QTreeWidgetItem,
+    QWidget)
+
+class Ui_ItemMoveDialog(object):
+    def setupUi(self, ItemMoveDialog):
+        if not ItemMoveDialog.objectName():
+            ItemMoveDialog.setObjectName(u"ItemMoveDialog")
+        ItemMoveDialog.resize(343, 362)
+        self.item_label = QLabel(ItemMoveDialog)
+        self.item_label.setObjectName(u"item_label")
+        self.item_label.setGeometry(QRect(20, 20, 81, 21))
+        self.item_name = QLabel(ItemMoveDialog)
+        self.item_name.setObjectName(u"item_name")
+        self.item_name.setGeometry(QRect(100, 20, 221, 20))
+        self.label_2 = QLabel(ItemMoveDialog)
+        self.label_2.setObjectName(u"label_2")
+        self.label_2.setGeometry(QRect(20, 50, 131, 16))
+        self.move_button = QPushButton(ItemMoveDialog)
+        self.move_button.setObjectName(u"move_button")
+        self.move_button.setGeometry(QRect(150, 320, 75, 24))
+        self.cancel_button = QPushButton(ItemMoveDialog)
+        self.cancel_button.setObjectName(u"cancel_button")
+        self.cancel_button.setGeometry(QRect(240, 320, 75, 24))
+        self.folder_widget = QTreeWidget(ItemMoveDialog)
+        __qtreewidgetitem = QTreeWidgetItem()
+        __qtreewidgetitem.setText(0, u"1");
+        self.folder_widget.setHeaderItem(__qtreewidgetitem)
+        self.folder_widget.setObjectName(u"folder_widget")
+        self.folder_widget.setGeometry(QRect(20, 80, 301, 221))
+
+        self.retranslateUi(ItemMoveDialog)
+
+        QMetaObject.connectSlotsByName(ItemMoveDialog)
+    # setupUi
+
+    def retranslateUi(self, ItemMoveDialog):
+        ItemMoveDialog.setWindowTitle(QCoreApplication.translate("ItemMoveDialog", u"Move Item", None))
+        self.item_label.setText(QCoreApplication.translate("ItemMoveDialog", u"Selected Item:", None))
+        self.item_name.setText(QCoreApplication.translate("ItemMoveDialog", u"Item", None))
+        self.label_2.setText(QCoreApplication.translate("ItemMoveDialog", u"Move Item to Folder:", None))
+        self.move_button.setText(QCoreApplication.translate("ItemMoveDialog", u"Move", None))
+        self.cancel_button.setText(QCoreApplication.translate("ItemMoveDialog", u"Cancel", None))
     # retranslateUi
 
 
