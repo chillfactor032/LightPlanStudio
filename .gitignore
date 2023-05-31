@@ -4,6 +4,7 @@ LightPlanStudio.dist/
 LightPlanStudio.onefile-build/
 LightPlanStudio.exe
 *.bak
+.pylintrc
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
